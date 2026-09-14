@@ -1,0 +1,14 @@
+node_modules/
+
+# Qualquer variante de .env fica de fora — inclusive cópias acidentais como
+# ".env.bak", ".env antigo" ou ".env copy". A única exceção é o modelo.
+.env*
+!.env.example
+coverage/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+!.vscode/extensions.json
+docs/resultados/**/*.tmp

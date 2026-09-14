@@ -1,0 +1,7 @@
+# Normaliza as quebras de linha para LF dentro do repositório, em qualquer
+# sistema. Sem isto, o Windows grava CRLF e o runner Linux da integração
+# contínua vê arquivos diferentes dos que estão na máquina de desenvolvimento.
+* text=auto eol=lf
+
+# Arquivos gerados: não poluem o diff nem contam nas estatísticas da linguagem.
+package-lock.json linguist-generated=true -diff

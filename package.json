@@ -1,0 +1,36 @@
+{
+  "name": "agendamento-clinico-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API REST de agendamento e pagamento de consultas clínicas — TCC, UniCatólica de Quixadá",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/servidor.js",
+    "dev": "node --watch src/servidor.js",
+    "migrate": "node scripts/migrar.js",
+    "migrate:desfazer": "node scripts/migrar.js --desfazer",
+    "migrate:teste": "node scripts/migrar.js --teste",
+    "seed": "node scripts/seed.js",
+    "test": "jest --runInBand",
+    "test:unit": "jest tests/unit",
+    "test:integracao": "jest tests/integration --runInBand"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.1",
+    "ws": "^8.21.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "node-pg-migrate": "^9.0.0",
+    "supertest": "^7.0.0"
+  }
+}

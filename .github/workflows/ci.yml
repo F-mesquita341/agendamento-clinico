@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  testes:
+    name: Testes
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agendamento_teste
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # O banco do runner é efêmero e descartado ao fim do job, então aqui só
+    # existe o de teste. Definir DATABASE_URL também faria config.js abortar,
+    # de propósito: as duas apontando para o mesmo lugar é erro em máquina
+    # de desenvolvimento.
+    env:
+      NODE_ENV: test
+      DATABASE_URL_TESTE: postgres://postgres:postgres@localhost:5432/agendamento_teste
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Aplicar migrations
+        run: npm run migrate:teste
+
+      - name: Rodar a suíte
+        run: npm test
