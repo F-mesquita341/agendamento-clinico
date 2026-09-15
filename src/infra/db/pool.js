@@ -24,7 +24,11 @@ const sobreWebSocket = transporte === 'websocket';
 // No transporte WebSocket o TLS é do próprio wss://, e o driver cuida disso.
 // No TCP, Neon e Render exigem TLS: o certificado deles vem de autoridade
 // pública, então a verificação padrão do Node funciona — não desligue.
-const exigeSsl = /sslmode=|neon\.tech|render\.com/.test(url);
+//
+// A verificação lista os modos que pedem TLS em vez de casar com `sslmode=`
+// solto: assim `sslmode=disable`, usado contra um PostgreSQL local, não acaba
+// forçando TLS contra um servidor que não o oferece.
+const exigeSsl = /sslmode=(require|verify-ca|verify-full)|neon\.tech|render\.com/.test(url);
 
 const opcoes = {
   connectionString: url,

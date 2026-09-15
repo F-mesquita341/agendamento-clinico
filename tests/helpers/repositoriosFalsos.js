@@ -7,17 +7,37 @@
  * otimista, simulado aqui com a mesma semântica do UPDATE ... WHERE versao:
  * se a versão apresentada não for a atual, a reserva não acontece e devolve
  * null. É isso que permite testar o caminho do 409 sem subir PostgreSQL.
+ *
+ * Regra ao mexer neste arquivo: o dublê só pode conhecer o que o adaptador
+ * real conhece. Inventar aqui um campo que a entidade do domínio não tem faz
+ * a suíte passar sobre código quebrado — foi exatamente o que aconteceu com o
+ * valor da consulta, que chegou a ser lido de um `horario.valorCentavos`
+ * existente apenas neste arquivo.
  */
 
 const { Consulta, STATUS_CONSULTA } = require('../../src/domain/Consulta');
 const { Horario, STATUS_HORARIO } = require('../../src/domain/Horario');
 const { Dinheiro } = require('../../src/domain/Dinheiro');
 
+/** Preço cobrado quando o teste não especifica outro. */
+const PRECO_PADRAO = 15000;
+
 class HorariosFalsos {
-  constructor(horarios = []) {
+  /**
+   * @param {Array} horarios
+   * @param {Record<string, number>} precos valor em centavos por profissional —
+   *        espelha `profissional.valor_consulta_centavos` no banco real.
+   */
+  constructor(horarios = [], precos = {}) {
     this.horarios = new Map(horarios.map((h) => [String(h.id), h]));
+    this.precos = precos;
     this.consultas = null; // ligado por criarRepositorios()
     this.proximoIdConsulta = 1;
+  }
+
+  /** Mesma leitura que o adaptador real faz, dentro da transação. */
+  precoDoProfissional(profissionalId) {
+    return this.precos[String(profissionalId)] ?? PRECO_PADRAO;
   }
 
   async porId(id) {
@@ -34,7 +54,7 @@ class HorariosFalsos {
     );
   }
 
-  async reservarEAgendar({ horarioId, versao, pacienteId, valorCentavos, reservaExpiraEm }) {
+  async reservarEAgendar({ horarioId, versao, pacienteId, reservaExpiraEm }) {
     const horario = this.horarios.get(String(horarioId));
 
     // Exatamente a condição do UPDATE:
@@ -51,7 +71,8 @@ class HorariosFalsos {
       pacienteId,
       horarioId: horario.id,
       status: STATUS_CONSULTA.PENDENTE_PAGAMENTO,
-      valor: Dinheiro.deCentavos(valorCentavos ?? 0),
+      // O adaptador é quem determina o valor, lendo o profissional.
+      valor: Dinheiro.deCentavos(this.precoDoProfissional(horario.profissionalId)),
       reservaExpiraEm,
       criadoEm: new Date(),
     });
@@ -109,19 +130,23 @@ class ConsultasFalsas {
   }
 }
 
-/** Monta o par já interligado, com os horários informados. */
-function criarRepositorios(horarios = []) {
-  const repoHorarios = new HorariosFalsos(horarios);
+/** Monta o par já interligado, com os horários e os preços informados. */
+function criarRepositorios(horarios = [], precos = {}) {
+  const repoHorarios = new HorariosFalsos(horarios, precos);
   const repoConsultas = new ConsultasFalsas();
   repoHorarios.consultas = repoConsultas;
   repoConsultas.horarios = repoHorarios;
   return { horarios: repoHorarios, consultas: repoConsultas };
 }
 
-/** Atalho para montar um horário de teste. */
+/**
+ * Atalho para montar um horário de teste.
+ *
+ * Note que ele NÃO carrega preço: o `Horario` do domínio também não carrega.
+ */
 function umHorario({ id = 1, profissionalId = 10, inicio, duracaoMin = 30, versao = 0, status } = {}) {
   const comeco = inicio instanceof Date ? inicio : new Date(inicio);
-  const h = new Horario({
+  return new Horario({
     id,
     profissionalId,
     inicio: comeco,
@@ -129,8 +154,6 @@ function umHorario({ id = 1, profissionalId = 10, inicio, duracaoMin = 30, versa
     status,
     versao,
   });
-  h.valorCentavos = 15000;
-  return h;
 }
 
-module.exports = { criarRepositorios, umHorario };
+module.exports = { criarRepositorios, umHorario, PRECO_PADRAO };

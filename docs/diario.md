@@ -94,3 +94,41 @@ passam a seguir o mesmo caminho.
 não responde.
 
 ---
+
+## 14/09/2026 — Revisão: um defeito que a suíte escondia
+
+Revisão do que foi construído até aqui. O achado principal merece registro
+porque é metodologicamente interessante.
+
+**O dublê de teste mentia.** O caso de uso `AgendarConsulta` lia o preço da
+consulta de `horario.valorCentavos`. Esse campo nunca existiu na entidade
+`Horario` — era enxertado à mão pelo utilitário de teste, na montagem do
+objeto falso. Em produção a leitura devolveria `undefined`, o operador `??`
+converteria para zero, e **toda consulta seria gravada com valor R$ 0,00**.
+Os 49 testes passavam, porque validavam um campo que só existia na ficção.
+
+É o modo de falha clássico de dublês: quando o objeto falso oferece mais do
+que o real, a suíte deixa de medir o sistema e passa a medir a si mesma.
+
+**Correção.** O valor deixou de ser informado pelo caso de uso. Passou a ser
+obrigação do adaptador de persistência, que lê
+`profissional.valor_consulta_centavos` dentro da mesma transação e grava em
+`consulta.valor_centavos`. Além de corrigir o defeito, a mudança é a modelagem
+certa por dois motivos: preço é atributo do profissional, não do horário; e
+congelá-lo no ato do agendamento garante que um reajuste posterior não altere
+consultas já marcadas.
+
+Os dublês passaram a receber uma tabela de preços por profissional, espelhando
+a coluna real, e dois testes novos verificam que a consulta nasce com o preço
+certo. A regressão foi confirmada na prática: reintroduzindo o defeito, os dois
+testes falham.
+
+**Outras correções menores.** Campo `relogio` sem uso removido de
+`CancelarConsulta`; verificação de TLS restrita aos modos que realmente pedem
+TLS, para que `sslmode=disable` contra um PostgreSQL local não force conexão
+cifrada; o servidor passou a registrar na subida qual transporte está em uso,
+já que lentidão inesperada costuma ser WebSocket ligado sem necessidade.
+
+**51 testes passando.**
+
+---

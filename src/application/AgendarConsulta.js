@@ -79,11 +79,14 @@ class AgendarConsulta {
 
     const expiraEm = new Date(agora.getTime() + this.reservaMinutos * 60_000);
 
+    // O valor NÃO é informado aqui: ele é lido do profissional pelo adaptador,
+    // dentro da mesma transação, e gravado na consulta. Duas razões — o preço
+    // é atributo do profissional, não do horário; e congelá-lo no ato garante
+    // que um reajuste posterior não altere consultas já marcadas.
     const consulta = await this.horarios.reservarEAgendar({
       horarioId: horario.id,
       versao,
       pacienteId,
-      valorCentavos: horario.valorCentavos ?? 0,
       reservaExpiraEm: expiraEm,
     });
 

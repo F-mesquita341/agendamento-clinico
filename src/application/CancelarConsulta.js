@@ -9,12 +9,10 @@
  */
 
 const { NaoEncontrado } = require('../domain/erros');
-const { relogioDoSistema } = require('../domain/Relogio');
 
 class CancelarConsulta {
-  constructor({ consultas, relogio = relogioDoSistema }) {
+  constructor({ consultas }) {
     this.consultas = consultas;
-    this.relogio = relogio;
   }
 
   async executar({ pacienteId, consultaId }) {

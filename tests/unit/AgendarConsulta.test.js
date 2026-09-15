@@ -13,8 +13,8 @@ const AGORA = new Date('2026-10-05T12:00:00-03:00');
 const DAQUI_A_UMA_HORA = new Date('2026-10-05T13:00:00-03:00');
 const ONTEM = new Date('2026-10-04T09:00:00-03:00');
 
-function montar(horarios) {
-  const repos = criarRepositorios(horarios);
+function montar(horarios, precos = {}) {
+  const repos = criarRepositorios(horarios, precos);
   const caso = new AgendarConsulta({
     horarios: repos.horarios,
     consultas: repos.consultas,
@@ -113,6 +113,28 @@ describe('AgendarConsulta', () => {
     const outra = await caso.executar({ pacienteId: 8, horarioId: 2, versao: 0 });
 
     expect(outra.pacienteId).toBe(8);
+  });
+
+  test('a consulta nasce com o preço do profissional, não com zero', async () => {
+    const comCardiologista = umHorario({ id: 1, profissionalId: 10, inicio: DAQUI_A_UMA_HORA });
+    const { caso } = montar([comCardiologista], { 10: 25000 });
+
+    const consulta = await caso.executar({ pacienteId: 7, horarioId: 1, versao: 0 });
+
+    expect(consulta.valor.centavos).toBe(25000);
+    expect(consulta.valor.formatar()).toBe('R$ 250,00');
+  });
+
+  test('cada profissional cobra o seu preço', async () => {
+    const comA = umHorario({ id: 1, profissionalId: 10, inicio: DAQUI_A_UMA_HORA });
+    const comB = umHorario({ id: 2, profissionalId: 20, inicio: new Date('2026-10-05T15:00:00-03:00') });
+    const { caso } = montar([comA, comB], { 10: 25000, 20: 18000 });
+
+    const naA = await caso.executar({ pacienteId: 7, horarioId: 1, versao: 0 });
+    const naB = await caso.executar({ pacienteId: 7, horarioId: 2, versao: 0 });
+
+    expect(naA.valor.centavos).toBe(25000);
+    expect(naB.valor.centavos).toBe(18000);
   });
 
   test('versão ausente é recusada antes de tocar no repositório', async () => {

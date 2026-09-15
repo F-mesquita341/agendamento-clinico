@@ -2,12 +2,15 @@
 
 const app = require('./interfaces/http/app');
 const config = require('./config');
-const { encerrar } = require('./infra/db/pool');
+const { encerrar, transporte } = require('./infra/db/pool');
 
 const servidor = app.listen(config.PORTA, () => {
   console.log(
     `API de agendamento ouvindo em http://localhost:${config.PORTA} (${config.NODE_ENV})`
   );
+  // Registrar o transporte poupa diagnóstico: uma lentidão inesperada costuma
+  // ser o WebSocket ligado numa rede em que o TCP direto funcionaria.
+  console.log(`Banco: PostgreSQL via ${transporte}`);
 });
 
 // O Render envia SIGTERM antes de derrubar o contêiner. Fechar o pool evita

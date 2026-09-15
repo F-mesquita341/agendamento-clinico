@@ -35,6 +35,17 @@ class RepositorioDeHorarios {
    * responsabilidade do adaptador de persistência — é ele que tem transação —,
    * e não do caso de uso, que só expressa a intenção.
    *
+   * O VALOR da consulta é obrigação do adaptador: ele lê
+   * `profissional.valor_consulta_centavos` dentro da mesma transação e grava
+   * em `consulta.valor_centavos`. O caso de uso não informa preço — se
+   * informasse, precisaria ter lido o profissional antes, fora da transação,
+   * e um reajuste no intervalo produziria cobrança divergente da combinada.
+   *
+   * @param {object} dados
+   * @param {number|string} dados.horarioId
+   * @param {number} dados.versao versão lida pelo cliente
+   * @param {number|string} dados.pacienteId
+   * @param {Date} dados.reservaExpiraEm
    * @returns {Promise<import('./Consulta').Consulta|null>} a consulta criada,
    *          ou `null` se a versão não conferia (outra pessoa chegou antes).
    */
