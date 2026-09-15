@@ -204,3 +204,46 @@ describe('mensagens de erro', () => {
     }
   });
 });
+
+describe('curingas do LIKE na busca', () => {
+  test('"%%" não casa com todo mundo — é tratado como texto', async () => {
+    const r = await request(servidor).get('/profissionais?q=%25%25');
+
+    expect(r.status).toBe(200);
+    expect(r.body.profissionais).toEqual([]);
+    expect(r.body.paginacao.total).toBe(0);
+  });
+
+  test('"__" não casa com qualquer nome — é tratado como texto', async () => {
+    const r = await request(servidor).get('/profissionais?q=__');
+
+    expect(r.body.profissionais).toEqual([]);
+    expect(r.body.paginacao.total).toBe(0);
+  });
+
+  test('a busca legítima continua funcionando depois do escape', async () => {
+    const r = await request(servidor).get('/profissionais?q=Ferreira');
+
+    expect(r.body.profissionais).toHaveLength(1);
+  });
+});
+
+describe('paginação', () => {
+  test('página além do fim informa o total real, não zero', async () => {
+    const r = await request(servidor).get('/profissionais?limite=10&pagina=5');
+
+    expect(r.status).toBe(200);
+    expect(r.body.profissionais).toEqual([]);
+    expect(r.body.paginacao.total).toBe(2);
+  });
+});
+
+describe('termo de busca repetido na query', () => {
+  test('?q=a&q=b é recusado em português, não com a mensagem do Zod', async () => {
+    const r = await request(servidor).get('/profissionais?q=ana&q=jose');
+
+    expect(r.status).toBe(422);
+    expect(r.body.erro.problemas[0].campo).toBe('q');
+    expect(r.body.erro.problemas[0].mensagem).toBe('Informe um único termo de busca.');
+  });
+});

@@ -22,8 +22,11 @@ const JANELA_MAXIMA_DIAS = 60;
 
 const filtrosDaBusca = z.object({
   especialidade: inteiroPositivo('A especialidade').optional(),
+  // `invalid_type_error` não é supérfluo: o Express transforma chaves
+  // repetidas na query em array, então `?q=a&q=b` chega aqui como `['a','b']`
+  // e o Zod recusaria com a mensagem padrão dele, em inglês.
   q: z
-    .string()
+    .string({ invalid_type_error: 'Informe um único termo de busca.' })
     .trim()
     .min(2, 'Busque por ao menos duas letras.')
     .max(80, 'A busca é longa demais.')

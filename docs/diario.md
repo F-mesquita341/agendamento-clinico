@@ -150,7 +150,9 @@ familiaridade digital, exigir a acentuação correta seria uma barreira de
 usabilidade evitável. Exigiu a migration 004, habilitando a extensão.
 
 **Paginação com total em uma consulta.** `count(*) OVER ()` avalia o conjunto
-completo antes do LIMIT, evitando a segunda ida ao banco só para contar.
+completo antes do LIMIT, evitando a segunda ida ao banco só para contar. Há uma
+exceção: quando a página pedida fica além do fim do conjunto, a função de
+janela não devolve linha alguma e o total sai numa consulta própria.
 
 **Apresentadores.** Criada uma camada de tradução entre entidades e JSON, para
 que a forma da resposta HTTP não vaze para o domínio. O domínio fala em
@@ -165,5 +167,44 @@ não intercepta "Invalid date", que é erro de valor e não de tipo. Corrigido c
 `errorMap`.
 
 **72 testes passando**, sendo 19 de integração contra o PostgreSQL real.
+
+---
+
+## 15/09/2026 — Achados da revisão em nuvem
+
+Revisão multi-agente executada sobre os commits `f881416` e `f201081`. Quatro
+achados, todos verificados no código e todos procedentes.
+
+**Curingas do LIKE não escapados** (o mais grave). O termo buscado era
+interpolado em `%${termo}%` sem tratamento. A consulta é parametrizada, então
+não havia injeção de SQL — mas `%` e `_` são curingas do próprio operador e
+continuavam valendo dentro do parâmetro. Buscar por `%%` devolvia todos os
+profissionais; `__` devolvia qualquer nome com duas letras ou mais. A lista
+voltava cheia de gente sem relação com o que a pessoa digitou, e o total da
+paginação refletia o curinga, não a busca. Corrigido escapando `\`, `%` e `_`,
+com `ESCAPE '\'` explícito na cláusula.
+
+**Comentário que mentia sobre a implementação.** O código afirmava, em
+comentário e no diário, que a paginação obtinha página e total em uma consulta
+via `count(*) OVER ()` — e então executava duas. Agora executa uma de fato,
+medido: uma consulta na página normal, duas apenas quando o deslocamento passa
+do fim do conjunto, caso em que a função de janela não devolve linha alguma e
+o total precisa ser buscado à parte.
+
+**Mensagem do Zod vazando no filtro de busca.** O Express converte chaves
+repetidas da query em array, então `?q=a&q=b` chegava como `['a','b']` e era
+recusado com a mensagem padrão da biblioteca, em inglês — exatamente o que o
+teste de idioma proíbe, num caminho que ele não exercitava.
+
+**Dublê divergindo do adaptador real.** O adaptador PostgreSQL usa intervalo
+semiaberto (`inicio >= de AND inicio < ate`); o dublê usava intervalo fechado.
+É a mesma classe de problema do defeito do valor da consulta, encontrado na
+revisão anterior: quando o objeto falso não espelha o real, a suíte deixa de
+medir o sistema.
+
+Os três primeiros ganharam teste de regressão, e a regressão foi confirmada na
+prática — reintroduzindo cada defeito, os testes correspondentes falham.
+
+**77 testes passando.**
 
 ---

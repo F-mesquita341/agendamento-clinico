@@ -49,8 +49,11 @@ class HorariosFalsos {
       (h) =>
         h.pertenceAo(profissionalId) &&
         h.estaDisponivel() &&
+        // Intervalo semiaberto — `inicio >= de AND inicio < ate` —, idêntico
+        // ao do adaptador PostgreSQL. Um dublê com limite fechado aceitaria um
+        // horário começando exatamente em `ate` que o banco recusaria.
         h.inicio >= de &&
-        h.inicio <= ate
+        h.inicio < ate
     );
   }
 
