@@ -79,4 +79,37 @@ class RepositorioDeConsultas {
   }
 }
 
-module.exports = { RepositorioDeHorarios, RepositorioDeConsultas };
+class RepositorioDeEspecialidades {
+  /** @returns {Promise<Array<{id: number, nome: string}>>} */
+  async listar() {
+    naoImplementado('RepositorioDeEspecialidades.listar');
+  }
+}
+
+class RepositorioDeProfissionais {
+  /**
+   * Busca paginada, filtrando por especialidade e por trecho do nome.
+   *
+   * @param {object} filtros
+   * @param {number} [filtros.especialidadeId]
+   * @param {string} [filtros.termo] trecho do nome, sem diferenciar acento
+   * @param {number} filtros.limite
+   * @param {number} filtros.deslocamento
+   * @returns {Promise<{itens: Array, total: number}>}
+   */
+  async listar(_filtros) {
+    naoImplementado('RepositorioDeProfissionais.listar');
+  }
+
+  /** @returns {Promise<import('./Profissional').Profissional|null>} */
+  async porId(_id) {
+    naoImplementado('RepositorioDeProfissionais.porId');
+  }
+}
+
+module.exports = {
+  RepositorioDeHorarios,
+  RepositorioDeConsultas,
+  RepositorioDeEspecialidades,
+  RepositorioDeProfissionais,
+};

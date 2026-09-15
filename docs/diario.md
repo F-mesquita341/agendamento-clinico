@@ -132,3 +132,38 @@ já que lentidão inesperada costuma ser WebSocket ligado sem necessidade.
 **51 testes passando.**
 
 ---
+
+## 15/09/2026 — Etapa 4: endpoints de leitura
+
+**Rede de volta ao normal.** A porta 5432 responde em 199 ms na rede doméstica;
+transporte devolvido para `tcp`, que é o padrão. A suíte foi executada nos dois
+transportes, com o mesmo resultado — o que confirma que a escolha de driver não
+altera comportamento observável.
+
+**Quatro endpoints.** `GET /especialidades`, `GET /profissionais` com filtro e
+paginação, `GET /profissionais/:id` e `GET /profissionais/:id/horarios`.
+
+**Busca sem acento.** A busca por nome usa `unaccent` combinado com `ILIKE`.
+Sem isso, procurar por "jose" não encontraria "José" — falha justamente nos
+nomes mais comuns no Brasil, e num público que inclui pessoas com pouca
+familiaridade digital, exigir a acentuação correta seria uma barreira de
+usabilidade evitável. Exigiu a migration 004, habilitando a extensão.
+
+**Paginação com total em uma consulta.** `count(*) OVER ()` avalia o conjunto
+completo antes do LIMIT, evitando a segunda ida ao banco só para contar.
+
+**Apresentadores.** Criada uma camada de tradução entre entidades e JSON, para
+que a forma da resposta HTTP não vaze para o domínio. O domínio fala em
+`Dinheiro` e `Date`; o cliente recebe centavos, texto formatado e ISO 8601.
+
+**Mensagens de erro em português.** O Zod emite mensagens em inglês por padrão.
+Como esta API é consumida por um aplicativo que pode exibir a mensagem direto
+ao paciente, e como o trabalho investiga usabilidade, cada regra passou a
+declarar a sua própria frase. Um teste verifica que nenhuma mensagem padrão do
+Zod vaza — e ele encontrou um vazamento na primeira execução: `invalid_type_error`
+não intercepta "Invalid date", que é erro de valor e não de tipo. Corrigido com
+`errorMap`.
+
+**72 testes passando**, sendo 19 de integração contra o PostgreSQL real.
+
+---

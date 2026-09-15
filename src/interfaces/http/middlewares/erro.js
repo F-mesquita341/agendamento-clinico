@@ -34,6 +34,9 @@ function tratadorDeErro(erro, req, res, next) {
         codigo: erro.codigo,
         mensagem: erro.message,
         acao: erro.acao,
+        // Erros de validação carregam a lista de campos problemáticos, para
+        // que o aplicativo possa destacar cada um no formulário.
+        ...(erro.problemas ? { problemas: erro.problemas } : {}),
       },
     });
   }
