@@ -59,6 +59,50 @@ class RegraDeNegocio extends ErroDeDominio {
   }
 }
 
+/**
+ * Token expirado é diferente de token inválido: a pessoa não fez nada de
+ * errado, só o tempo passou. A ação diz ao app para renovar o token e repetir
+ * a requisição em silêncio, em vez de mandar a pessoa de volta ao login.
+ */
+class SessaoExpirada extends ErroDeDominio {
+  constructor() {
+    super('SESSAO_EXPIRADA', 'Sua sessão expirou. Entre novamente para continuar.', {
+      status: 401,
+      acao: 'renovar_token',
+    });
+  }
+}
+
+/** Autenticado, mas ainda sem cadastro de paciente — o app leva ao cadastro. */
+class PerfilNaoCadastrado extends ErroDeDominio {
+  constructor() {
+    super('PERFIL_NAO_CADASTRADO', 'Complete seu cadastro para continuar.', {
+      status: 404,
+      acao: 'completar_cadastro',
+    });
+  }
+}
+
+class PacienteJaCadastrado extends ErroDeDominio {
+  constructor() {
+    super('PACIENTE_JA_CADASTRADO', 'Esta conta já tem um cadastro de paciente.', {
+      status: 409,
+    });
+  }
+}
+
+/**
+ * LGPD, Art. 11: dado de saúde só pode ser tratado com consentimento
+ * específico e destacado. A ação diz ao app para exibir o termo.
+ */
+class ConsentimentoObrigatorio extends ErroDeDominio {
+  constructor(
+    mensagem = 'Para se cadastrar, é preciso ler e aceitar o termo de consentimento.'
+  ) {
+    super('CONSENTIMENTO_OBRIGATORIO', mensagem, { status: 422, acao: 'exibir_termo' });
+  }
+}
+
 module.exports = {
   ErroDeDominio,
   HorarioIndisponivel,
@@ -66,4 +110,8 @@ module.exports = {
   NaoAutenticado,
   AcessoNegado,
   RegraDeNegocio,
+  SessaoExpirada,
+  PerfilNaoCadastrado,
+  PacienteJaCadastrado,
+  ConsentimentoObrigatorio,
 };

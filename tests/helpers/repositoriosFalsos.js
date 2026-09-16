@@ -18,6 +18,8 @@
 const { Consulta, STATUS_CONSULTA } = require('../../src/domain/Consulta');
 const { Horario, STATUS_HORARIO } = require('../../src/domain/Horario');
 const { Dinheiro } = require('../../src/domain/Dinheiro');
+const { Paciente } = require('../../src/domain/Paciente');
+const { PacienteJaCadastrado } = require('../../src/domain/erros');
 
 /** Preço cobrado quando o teste não especifica outro. */
 const PRECO_PADRAO = 15000;
@@ -159,4 +161,54 @@ function umHorario({ id = 1, profissionalId = 10, inicio, duracaoMin = 30, versa
   });
 }
 
-module.exports = { criarRepositorios, umHorario, PRECO_PADRAO };
+/**
+ * Pacientes em memória.
+ *
+ * Espelha o adaptador PostgreSQL em dois pontos que os testes precisam
+ * enxergar: a unicidade de `firebaseUid` — que no banco é uma restrição
+ * UNIQUE e aqui lança o mesmo erro de domínio — e a auditoria, registrada
+ * com os nomes dos campos e nunca com os valores.
+ */
+class PacientesFalsos {
+  constructor() {
+    this.itens = new Map();
+    this.auditoria = [];
+    this.proximoId = 1;
+  }
+
+  async porFirebaseUid(firebaseUid) {
+    return [...this.itens.values()].find((p) => p.firebaseUid === firebaseUid) ?? null;
+  }
+
+  async porId(id) {
+    return this.itens.get(String(id)) ?? null;
+  }
+
+  async criar(dados) {
+    if (await this.porFirebaseUid(dados.firebaseUid)) {
+      throw new PacienteJaCadastrado();
+    }
+    const paciente = new Paciente({ id: this.proximoId++, ...dados });
+    this.itens.set(String(paciente.id), paciente);
+    this.auditoria.push({
+      acao: 'paciente.cadastrado',
+      entidadeId: paciente.id,
+      detalhe: { consentimentoVersao: dados.consentimentoVersao },
+    });
+    return paciente;
+  }
+
+  async atualizar(id, campos) {
+    const atual = this.itens.get(String(id));
+    const atualizado = new Paciente({ ...atual, ...campos });
+    this.itens.set(String(id), atualizado);
+    this.auditoria.push({
+      acao: 'paciente.atualizado',
+      entidadeId: atual.id,
+      detalhe: { campos: Object.keys(campos) },
+    });
+    return atualizado;
+  }
+}
+
+module.exports = { criarRepositorios, umHorario, PRECO_PADRAO, PacientesFalsos };
