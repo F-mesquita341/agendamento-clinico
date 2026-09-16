@@ -439,3 +439,33 @@ causa real de falhas de conexão, que antes ficava escondida atrás de
 **181 testes passando.**
 
 ---
+
+## 16/09/2026 — Portão da Etapa 5 atingido
+
+Verificação executada pelo autor às 17:13, com a API rodando localmente e
+`scripts/verificar-token-real.js` usando **tokens reais emitidos pelo Firebase**
+para os dois usuários de teste. As catorze verificações passaram:
+
+- tokens emitidos pelo Firebase para os usuários A e B;
+- cada token cadastrou o próprio perfil (201) e o leu de volta (200), com o
+  e-mail da conta correspondente;
+- o perfil lido com o token de A não contém dado de B, e vice-versa, e os dois
+  tokens resolvem para pacientes diferentes;
+- token com assinatura adulterada foi recusado (401), assim como requisição sem
+  token (401).
+
+Conferido depois no banco de desenvolvimento: dois pacientes, ambos com
+consentimento registrado na versão `2026-09-v1` e horário do aceite marcado pelo
+relógio do servidor; duas linhas de auditoria `paciente.cadastrado`, sem nome,
+e-mail ou telefone no detalhe.
+
+Com isso, a Etapa 5 cumpre o portão definido no plano: um token real do Firebase
+autentica uma requisição de ponta a ponta, e um paciente não alcança dado de
+outro. A suíte automatizada cobre o mesmo comportamento com verificador falso,
+em 181 testes; a execução com token real prova que o contrato do verificador
+falso corresponde ao do Firebase.
+
+A execução anterior, às 16:37, havia falhado por queda da conexão — registrado
+na entrada sobre o carregamento do Firebase Admin na subida, que foi a correção.
+
+---
