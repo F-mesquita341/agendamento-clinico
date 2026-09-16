@@ -72,14 +72,25 @@ async function obterTokenReal(email, senha) {
 }
 
 async function api(metodo, caminho, { token, corpo } = {}) {
-  const resposta = await fetch(`${API}${caminho}`, {
-    method: metodo,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(corpo ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: corpo ? JSON.stringify(corpo) : undefined,
-  });
+  let resposta;
+  try {
+    resposta = await fetch(`${API}${caminho}`, {
+      method: metodo,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(corpo ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: corpo ? JSON.stringify(corpo) : undefined,
+    });
+  } catch (erro) {
+    // "fetch failed" sozinho não diz nada. A causa real — conexão recusada,
+    // conexão derrubada no meio — fica em `erro.cause`.
+    const causa = erro.cause ? `${erro.cause.code ?? ''} ${erro.cause.message ?? ''}`.trim() : erro.message;
+    throw new Error(
+      `a API não respondeu a ${metodo} ${caminho} (${causa}). ` +
+        'Olhe o terminal onde a API está rodando: ela pode ter caído ou reiniciado.'
+    );
+  }
   const texto = await resposta.text();
   return { status: resposta.status, corpo: texto ? JSON.parse(texto) : null, texto };
 }

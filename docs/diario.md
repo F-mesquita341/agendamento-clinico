@@ -389,3 +389,53 @@ não permitidos. Oito testes falharam.
 **178 testes passando.**
 
 ---
+
+## 16/09/2026 — Firebase Admin carregado na subida
+
+**O incidente.** Na primeira execução da verificação com token real, os dois
+tokens foram emitidos pelo Firebase, mas a primeira chamada autenticada à API
+terminou em conexão derrubada, sem resposta. A investigação mostrou que a API
+havia sido reiniciada pelo `node --watch` no instante da requisição, sem nenhum
+arquivo do projeto alterado, e que uma requisição com token inválido não
+derrubava o processo.
+
+A explicação que fecha com as evidências: o SDK era carregado sob demanda, na
+primeira requisição autenticada. Isso lê pela primeira vez centenas de arquivos
+da biblioteca; no Windows, a inspeção desses arquivos pelo antivírus é tomada
+como mudança pelo vigia de recarga, que reinicia a API no meio da resposta. Não
+se repetiu uma vez que os arquivos já estavam inspecionados.
+
+**A correção.** O servidor passou a carregar o Firebase Admin na subida, antes
+de abrir a porta. Medido: 121 ms de carregamento na subida, e a primeira
+requisição autenticada respondeu em 42 ms. Além de eliminar a interação com o
+vigia, isso tira a espera da primeira pessoa a entrar no aplicativo — relevante
+para as sessões de teste medidas pelo SUS. A suíte não passa por esse caminho:
+monta o app com o verificador falso.
+
+**Validação da chave na subida.** Constatou-se que o SDK não lê o arquivo de
+credencial ao inicializar, só ao verificar o primeiro token. Carregar na subida
+sem validar daria uma falsa impressão de prontidão. A configuração passou a
+conferir se o arquivo é JSON válido e se contém `type`, `project_id`,
+`client_email` e `private_key`, citando no erro só os nomes dos campos.
+
+**Um teste que não media nada.** O teste de que o erro de JSON inválido não
+vaza conteúdo da chave passou mesmo com o vazamento reintroduzido de propósito.
+Motivo: o arquivo de teste era um JSON truncado, para o qual o V8 emite
+"Unterminated string" sem citar o texto — não havia o que vazar. O V8 só cita
+trecho em erros de caractere inesperado, e mesmo assim só uns dez caracteres ao
+redor. O teste foi refeito com um valor sem aspas, que produz o trecho, e passou
+a procurar o fragmento em vez do texto inteiro. Reintroduzido o vazamento, agora
+falha. É a terceira ocorrência, neste trabalho, de teste verde sobre defeito —
+as duas anteriores foram dublês que não espelhavam o adaptador real. Confirmar
+cada teste de regra de segurança reintroduzindo o defeito deixou de ser cuidado
+extra e passou a ser parte do método.
+
+**Porta ocupada.** O servidor passou a explicar, sem pilha de erro, quando a
+porta já está em uso — situação que ocorreu na prática ao subir a API com outra
+cópia já aberta em outro terminal. E o script de verificação passou a mostrar a
+causa real de falhas de conexão, que antes ficava escondida atrás de
+"fetch failed".
+
+**181 testes passando.**
+
+---
