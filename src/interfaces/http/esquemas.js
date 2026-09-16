@@ -33,4 +33,97 @@ function data(nomeAmigavel) {
   return z.coerce.date({ errorMap: () => ({ message: mensagem }) });
 }
 
-module.exports = { inteiroPositivo, data };
+/**
+ * Objeto que recusa campos não previstos.
+ *
+ * Usado nos corpos que tocam dado pessoal: se o aplicativo mandar `email` ou
+ * `firebaseUid` achando que serão aplicados, é melhor recusar com mensagem
+ * clara do que ignorar em silêncio e deixar o defeito do cliente passar.
+ */
+function objetoEstrito(forma, descricao) {
+  return z
+    .object(forma, {
+      errorMap: (problema, contexto) => {
+        if (problema.code === 'unrecognized_keys') {
+          return { message: `Campo não permitido: ${problema.keys.join(', ')}.` };
+        }
+        if (problema.code === 'invalid_type') {
+          return { message: `${descricao} precisa ser um objeto JSON.` };
+        }
+        return { message: contexto.defaultError };
+      },
+    })
+    .strict();
+}
+
+/** Nome da pessoa: espaços extras removidos, de 2 a 120 caracteres. */
+function nomeDePessoa() {
+  return z
+    .string({
+      required_error: 'Informe o nome.',
+      invalid_type_error: 'O nome precisa ser um texto.',
+    })
+    .transform((texto) => texto.trim().replace(/\s+/g, ' '))
+    .pipe(
+      z
+        .string()
+        .min(2, 'O nome precisa ter ao menos duas letras.')
+        .max(120, 'O nome é longo demais.')
+    );
+}
+
+/** Telefone brasileiro com DDD, guardado só com os dígitos. */
+function telefone() {
+  return z
+    .string({ invalid_type_error: 'O telefone precisa ser um texto.' })
+    .transform((texto) => texto.replace(/\D/g, ''))
+    .refine((digitos) => digitos.length === 10 || digitos.length === 11, {
+      message: 'Informe o telefone com DDD, com 10 ou 11 dígitos.',
+    });
+}
+
+/**
+ * Data de calendário no formato AAAA-MM-DD, sem hora e sem fuso.
+ *
+ * Confere que a data existe de fato — "2026-02-30" tem o formato certo e não
+ * é um dia — e que não está no futuro.
+ */
+function dataDeNascimento() {
+  const hoje = () => new Date().toISOString().slice(0, 10);
+  const existe = (texto) => {
+    const instante = new Date(`${texto}T00:00:00Z`);
+    return !Number.isNaN(instante.getTime()) && instante.toISOString().slice(0, 10) === texto;
+  };
+
+  // Verificações em sequência, parando na primeira falha. Com refinamentos
+  // independentes, um texto como "abc" acumularia três mensagens — e uma delas
+  // diria que a data "está no futuro", porque "abc" > "2026-..." na comparação
+  // de texto. O paciente veria um erro que não descreve o que fez.
+  return z
+    .string({ invalid_type_error: 'A data de nascimento precisa ser um texto.' })
+    .superRefine((texto, contexto) => {
+      const falhar = (message) => contexto.addIssue({ code: z.ZodIssueCode.custom, message });
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+        return falhar('Informe a data de nascimento no formato AAAA-MM-DD.');
+      }
+      if (!existe(texto)) {
+        return falhar('Essa data de nascimento não existe no calendário.');
+      }
+      if (texto < '1900-01-01') {
+        return falhar('Confira o ano da data de nascimento.');
+      }
+      if (texto > hoje()) {
+        return falhar('A data de nascimento não pode estar no futuro.');
+      }
+    });
+}
+
+module.exports = {
+  inteiroPositivo,
+  data,
+  objetoEstrito,
+  nomeDePessoa,
+  telefone,
+  dataDeNascimento,
+};

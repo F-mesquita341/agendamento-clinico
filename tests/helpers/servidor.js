@@ -18,12 +18,18 @@
  *   await request(servidor).get('/saude');
  */
 
-const app = require('../../src/interfaces/http/app');
+const { criarApp } = require('../../src/interfaces/http/app');
 const { consultar, encerrar } = require('../../src/infra/db/pool');
+const { verificadorFalso } = require('./verificadorFalso');
 
-async function iniciar() {
+/**
+ * O verificador falso é o padrão: nenhum teste deve depender, por esquecimento,
+ * de rede ou credencial do Firebase — a integração contínua não tem nenhuma
+ * das duas.
+ */
+async function iniciar({ verificarToken = verificadorFalso, relogio } = {}) {
   // Porta 0: o sistema operacional escolhe uma livre.
-  const servidor = app.listen(0);
+  const servidor = criarApp({ verificarToken, relogio }).listen(0);
 
   // O plano gratuito do Neon suspende o compute quando fica ocioso. A primeira
   // consulta depois disso leva vários segundos para acordá-lo, o que estourava

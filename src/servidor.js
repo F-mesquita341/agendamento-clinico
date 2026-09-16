@@ -1,6 +1,8 @@
 'use strict';
 
-const app = require('./interfaces/http/app');
+const { criarApp } = require('./interfaces/http/app');
+
+const app = criarApp();
 const config = require('./config');
 const { encerrar, transporte } = require('./infra/db/pool');
 
