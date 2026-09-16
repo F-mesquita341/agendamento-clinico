@@ -31,9 +31,27 @@ const esquema = z.object({
   // driver do Neon na 443, para redes que bloqueiam a porta do banco.
   // Ver src/infra/db/driver.js.
   TRANSPORTE_BANCO: z.enum(['tcp', 'websocket']).default('tcp'),
+
+  // Credencial do Firebase Admin, em uma de duas formas:
+  //   arquivo — GOOGLE_APPLICATION_CREDENTIALS com o CAMINHO do JSON da conta
+  //             de serviço. Usada no desenvolvimento: a chave fica no arquivo,
+  //             fora do repositório, e nunca passa por este processo como texto.
+  //   campos  — as três variáveis FIREBASE_*, para serviços como o Render, onde
+  //             não há arquivo e as variáveis ficam no painel do provedor.
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().min(1).optional(),
+  FIREBASE_PROJECT_ID: z.string().min(1).optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().min(1).optional(),
+  FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
 });
 
-const resultado = esquema.safeParse(process.env);
+// Variável definida com valor vazio (`CHAVE=`) conta como não definida. É o
+// que acontece com quem copia o .env.example e não preenche os campos
+// opcionais — e isso não pode impedir a API de subir.
+const ambiente = Object.fromEntries(
+  Object.entries(process.env).filter(([, valor]) => valor !== '')
+);
+
+const resultado = esquema.safeParse(ambiente);
 
 if (!resultado.success) {
   const linhas = resultado.error.issues.map(
@@ -113,6 +131,45 @@ if (config.NODE_ENV === 'test') {
     );
   }
   config.urlDoBanco = config.DATABASE_URL;
+}
+
+// --- Credencial do Firebase ---------------------------------------------------
+
+const camposFirebase = [
+  config.FIREBASE_PROJECT_ID,
+  config.FIREBASE_CLIENT_EMAIL,
+  config.FIREBASE_PRIVATE_KEY,
+];
+const quantosCampos = camposFirebase.filter(Boolean).length;
+
+if (quantosCampos > 0 && quantosCampos < 3) {
+  abortar(
+    'Credencial do Firebase incompleta: defina FIREBASE_PROJECT_ID,\n' +
+      'FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY juntas, ou nenhuma delas.'
+  );
+}
+
+if (config.GOOGLE_APPLICATION_CREDENTIALS) {
+  // Verificado aqui, na subida, porque o erro do próprio SDK só apareceria na
+  // primeira requisição autenticada — e como falha genérica de autenticação.
+  if (!require('fs').existsSync(config.GOOGLE_APPLICATION_CREDENTIALS)) {
+    abortar(
+      'GOOGLE_APPLICATION_CREDENTIALS aponta para um arquivo que não existe:\n' +
+        `  ${config.GOOGLE_APPLICATION_CREDENTIALS}`
+    );
+  }
+}
+
+config.credencialFirebase =
+  quantosCampos === 3 ? 'campos' : config.GOOGLE_APPLICATION_CREDENTIALS ? 'arquivo' : null;
+
+// Em produção, sem credencial nenhuma, toda requisição autenticada falharia.
+// Melhor não subir do que subir aparentemente saudável.
+if (config.NODE_ENV === 'production' && !config.credencialFirebase) {
+  abortar(
+    'Em produção a credencial do Firebase é obrigatória. Defina as três\n' +
+      'variáveis FIREBASE_* ou GOOGLE_APPLICATION_CREDENTIALS.'
+  );
 }
 
 config.origens =

@@ -42,7 +42,16 @@ afterAll(() => {
 function carregarConfig(variaveis) {
   const ambiente = { ...process.env };
   // Remove qualquer resquício do ambiente do Jest, para que só o cenário valha.
-  for (const chave of ['NODE_ENV', 'DATABASE_URL', 'DATABASE_URL_TESTE', 'TRANSPORTE_BANCO']) {
+  for (const chave of [
+    'NODE_ENV',
+    'DATABASE_URL',
+    'DATABASE_URL_TESTE',
+    'TRANSPORTE_BANCO',
+    'GOOGLE_APPLICATION_CREDENTIALS',
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_PRIVATE_KEY',
+  ]) {
     delete ambiente[chave];
   }
 
@@ -133,5 +142,90 @@ describe('transporte do banco', () => {
 
     expect(r.codigo).toBe(1);
     expect(r.saida).toMatch(/TRANSPORTE_BANCO/);
+  });
+});
+
+describe('credencial do Firebase', () => {
+  const CAMPOS = {
+    FIREBASE_PROJECT_ID: 'projeto-exemplo',
+    FIREBASE_CLIENT_EMAIL: 'conta@projeto-exemplo.iam.gserviceaccount.com',
+    FIREBASE_PRIVATE_KEY: 'chave-de-exemplo-nao-real',
+  };
+
+  test('em produção, sem credencial nenhuma, a API não sobe', () => {
+    const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/credencial do Firebase é obrigatória/);
+  });
+
+  test('em produção, com as três variáveis FIREBASE_*, sobe', () => {
+    const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS });
+
+    expect(r.codigo).toBe(0);
+  });
+
+  test('em produção, com o caminho de um arquivo existente, sobe', () => {
+    const arquivo = path.join(pastaSemEnv, 'credencial-de-exemplo.json');
+    fs.writeFileSync(arquivo, '{}');
+
+    const r = carregarConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: DIRETO,
+      GOOGLE_APPLICATION_CREDENTIALS: arquivo,
+    });
+
+    expect(r.codigo).toBe(0);
+  });
+
+  test('caminho para arquivo inexistente é recusado já na subida', () => {
+    const r = carregarConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: DIRETO,
+      GOOGLE_APPLICATION_CREDENTIALS: path.join(pastaSemEnv, 'nao-existe.json'),
+    });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/arquivo que não existe/);
+  });
+
+  test('variáveis FIREBASE_* incompletas são recusadas', () => {
+    const { FIREBASE_PRIVATE_KEY, ...semAChave } = CAMPOS;
+
+    const r = carregarConfig({ NODE_ENV: 'development', DATABASE_URL: DIRETO, ...semAChave });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/incompleta/);
+    expect(FIREBASE_PRIVATE_KEY).toBeDefined();
+  });
+
+  test('fora de produção, a credencial é opcional', () => {
+    const r = carregarConfig({ NODE_ENV: 'development', DATABASE_URL: DIRETO });
+
+    expect(r.codigo).toBe(0);
+  });
+
+  test('variáveis vazias, como no .env.example copiado, contam como ausentes', () => {
+    const r = carregarConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: DIRETO,
+      GOOGLE_APPLICATION_CREDENTIALS: '',
+      FIREBASE_PROJECT_ID: '',
+      FIREBASE_CLIENT_EMAIL: '',
+      FIREBASE_PRIVATE_KEY: '',
+    });
+
+    expect(r.codigo).toBe(0);
+  });
+
+  test('a mensagem de erro nunca ecoa a chave privada', () => {
+    const r = carregarConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: DIRETO,
+      FIREBASE_PRIVATE_KEY: 'segredo-que-nao-pode-aparecer',
+    });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).not.toMatch(/segredo-que-nao-pode-aparecer/);
   });
 });

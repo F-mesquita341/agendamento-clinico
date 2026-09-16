@@ -5,7 +5,7 @@
   "description": "API REST de agendamento e pagamento de consultas clínicas — TCC, UniCatólica de Quixadá",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node src/servidor.js",
@@ -16,13 +16,15 @@
     "seed": "node scripts/seed.js",
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
-    "test:integracao": "jest tests/integration --runInBand"
+    "test:integracao": "jest tests/integration --runInBand",
+    "verificar:token": "node scripts/verificar-token-real.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "firebase-admin": "^14.4.0",
     "helmet": "^8.0.0",
     "pg": "^8.13.1",
     "ws": "^8.21.3",
