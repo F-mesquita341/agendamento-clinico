@@ -300,3 +300,92 @@ confirmada na prática: revertendo o tratador de erros, dois testes falham.
 **95 testes passando.**
 
 ---
+
+## 16/09/2026 — Etapa 5: autenticação e cadastro de pacientes
+
+**Projeto Firebase** `agendamento-clinico-bd390`, com login por e-mail e senha e
+dois usuários de teste em `example.com`, domínio reservado para esse fim.
+
+**A chave privada nunca entrou no `.env`.** O plano original previa copiar três
+campos do JSON da conta de serviço para o `.env`. Foi abandonado ao notar que o
+ambiente de desenvolvimento assistido exibe o conteúdo do `.env` sempre que ele
+muda — motivo pelo qual a senha do banco já havia aparecido em registros de
+trabalho. O `.env` guarda apenas `GOOGLE_APPLICATION_CREDENTIALS`, com o caminho
+do arquivo, que fica fora do repositório e fora da pasta sincronizada com a
+nuvem. Para hospedagem sem arquivo, a configuração aceita as três variáveis
+`FIREBASE_*`, a serem definidas no painel do provedor.
+
+**Verificador de token injetável.** O aplicativo Express passou a ser montado
+por uma fábrica, `criarApp({ verificarToken })`. Em produção, o verificador é o
+do Firebase, inicializado só na primeira requisição autenticada; nos testes, um
+verificador falso com o mesmo contrato. Isso mantém a suíte sem dependência de
+rede e de credencial — condição para rodar no GitHub Actions, que não tem acesso
+ao Firebase. A autenticação com token real é provada à parte, por
+`scripts/verificar-token-real.js`, executado pelo autor no próprio terminal,
+para que senhas dos usuários de teste não circulem em registro nenhum.
+
+**Falha do servidor não vira 401.** O adaptador traduz em 401 apenas uma lista
+fechada de códigos do Firebase que significam "token inválido". Credencial
+ausente, chave corrompida ou queda de rede ao buscar as chaves públicas do
+Google continuam sendo erro interno: traduzi-los em 401 mandaria a pessoa
+refazer login num sistema quebrado do lado do servidor, e esconderia a falha do
+monitoramento. É a mesma classe de problema apontada na revisão anterior, quando
+erros do analisador de corpo apareciam como 500.
+
+**Identidade vem do token, nunca do corpo.** Uid e e-mail são lidos do token
+verificado. Corpos com `email` ou `firebaseUid` são recusados com 422. Não existe
+rota que receba id de paciente: `/pacientes/me` é resolvido pelo token, o que
+torna o isolamento entre pacientes uma propriedade da estrutura das rotas, e não
+de uma verificação que alguém possa esquecer.
+
+**Consentimento LGPD como pré-condição.** O cadastro exige o aceite da versão
+vigente do termo (`docs/termo-de-consentimento.md`, em rascunho para revisão com
+o orientador). O instante do aceite é o do servidor — um horário enviado pelo
+aplicativo não prova nada. A migration 006 torna as duas colunas de
+consentimento obrigatórias no próprio banco: não existe paciente sem prova de
+consentimento, mesmo que alguém insira pelo painel. Verificado na prática: o
+PostgreSQL recusa o INSERT.
+
+**Minimização de dados.** Não se coleta CPF, endereço nem documento; nada no
+escopo precisa deles.
+
+**Auditoria na mesma transação** do cadastro e da atualização, registrando nomes
+de campos e nunca valores. Primeiro uso real de `transacao()` depois da correção
+do ROLLBACK na revisão do repositório completo.
+
+**Cadastro concorrente.** Dez cadastros simultâneos da mesma conta resultam em
+exatamente um sucesso: todos passam pela checagem prévia do caso de uso, e a
+restrição UNIQUE do banco decide. A violação (código 23505, restrição
+`paciente_firebase_uid_key`) é traduzida em 409 — só essa restrição, para que
+outras violações continuem aparecendo como defeito.
+
+**Trocas registradas.** Sem verificação de revogação de token a cada requisição:
+exigiria uma chamada aos servidores do Firebase por requisição, e a latência
+pesa na percepção de usabilidade medida pelo SUS; tokens expiram em uma hora.
+E-mail verificado não é exigido, para não acrescentar uma etapa de confirmação
+nas sessões de teste com participantes. Ambas são limitações a declarar no
+Capítulo 7.
+
+**Dependência com alerta moderado não corrigido.** O `firebase-admin` traz o
+`gaxios`, que depende de `uuid@9`, alvo de alerta sobre v3/v5/v6 com buffer
+fornecido pelo chamador. O `gaxios` usa apenas `uuid.v4()` sem argumentos, então
+o caminho vulnerável não é alcançável. Forçar o `uuid@11` por baixo de uma
+dependência que declara `^9` traria mais risco do que o alerta. O `engines` do
+projeto subiu para Node 22, exigência do `firebase-admin` 14.
+
+**Revisão própria** encontrou três problemas antes do commit: mensagens de data
+de nascimento enganosas ("abc" produzia também "não pode estar no futuro",
+porque "abc" é maior que "2026-..." na comparação de texto); `atualizar` no
+adaptador montando SQL inválido quando chamado sem campos e quebrando se o
+paciente sumisse entre leitura e escrita; e um método de domínio sem uso. Além
+disso, variáveis opcionais vazias no `.env.example` impediriam a API de subir —
+passaram a contar como ausentes.
+
+Os testes de regra de segurança foram confirmados reintroduzindo quatro
+defeitos: toda falha do Firebase virando 401, violação de unicidade sem
+tradução, horário do consentimento aceito do cliente, e PATCH aceitando campos
+não permitidos. Oito testes falharam.
+
+**178 testes passando.**
+
+---

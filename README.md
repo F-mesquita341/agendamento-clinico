@@ -20,11 +20,12 @@ de Quixadá.
 
 | Camada | Tecnologia |
 |---|---|
-| Runtime | Node.js 20+ |
+| Runtime | Node.js 22+ |
 | HTTP | Express |
 | Banco | PostgreSQL (Neon) |
 | Validação | Zod |
 | Migrations | node-pg-migrate |
+| Autenticação | Firebase Authentication (Admin SDK) |
 | Testes | Jest e Supertest |
 | CI | GitHub Actions |
 
@@ -46,7 +47,7 @@ quebrada em algum lugar.
 
 ## Como rodar
 
-Pré-requisitos: Node.js 20 ou superior e uma conta no [Neon](https://neon.tech)
+Pré-requisitos: Node.js 22 ou superior e uma conta no [Neon](https://neon.tech)
 (tier gratuito).
 
 ```bash
@@ -113,6 +114,7 @@ normalmente. Muda só o transporte.
 | `npm run seed` | Popula dados de trabalho (idempotente) |
 | `npm test` | Roda a suíte completa |
 | `npm run test:unit` | Só os testes de unidade, sem banco |
+| `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
 
 ## Convenções da API
 
@@ -163,6 +165,71 @@ Há ainda uma segunda defesa, no próprio banco: o índice único parcial
 algum caminho futuro esqueça de comparar a versão. Ele é *parcial* — ignora
 consultas canceladas — porque um horário cancelado precisa voltar a ser
 agendável, enquanto o registro do cancelamento permanece para o histórico.
+
+## Autenticação
+
+A identidade é do Firebase Authentication. O aplicativo faz login no Firebase e
+envia o ID Token em cada requisição protegida:
+
+```
+Authorization: Bearer <id-token>
+```
+
+A API verifica o token com o Admin SDK. **Uid e e-mail vêm sempre do token
+verificado**, nunca do corpo da requisição.
+
+| Rota | O que faz |
+|---|---|
+| `POST /pacientes` | Cadastra o perfil da conta autenticada |
+| `GET /pacientes/me` | Lê o próprio perfil |
+| `PATCH /pacientes/me` | Atualiza nome, telefone ou data de nascimento |
+
+Não há rota que receba id de paciente: `/me` é resolvido pelo token, e por
+isso ninguém lê o perfil de outra pessoa trocando um número na URL.
+
+Respostas relevantes para o aplicativo:
+
+| Código | Ação indicada | Quando |
+|---|---|---|
+| `NAO_AUTENTICADO` (401) | `autenticar` | Token ausente ou inválido |
+| `SESSAO_EXPIRADA` (401) | `renovar_token` | Token expirou — renovar e repetir, sem voltar ao login |
+| `PERFIL_NAO_CADASTRADO` (404) | `completar_cadastro` | Conta autenticada ainda sem cadastro |
+| `CONSENTIMENTO_OBRIGATORIO` (422) | `exibir_termo` | Cadastro sem aceite da versão vigente do termo |
+
+### Consentimento (LGPD)
+
+O cadastro exige `consentimento: { aceito: true, versao }` com a versão vigente
+do [termo](docs/termo-de-consentimento.md). A API grava a versão aceita e o
+instante do aceite pelo relógio do servidor, e o banco recusa paciente sem esses
+dois campos. Cadastros e atualizações geram linha em `auditoria`, com os nomes
+dos campos alterados e nunca os valores.
+
+### Credencial do Firebase
+
+Em desenvolvimento, aponte para o JSON da conta de serviço **pelo caminho**:
+
+```
+GOOGLE_APPLICATION_CREDENTIALS=C:/caminho/fora/do/repositorio/chave.json
+```
+
+Em hospedagem sem arquivo, defina `FIREBASE_PROJECT_ID`,
+`FIREBASE_CLIENT_EMAIL` e `FIREBASE_PRIVATE_KEY` no painel do provedor. Em
+produção, a API não sobe sem uma das duas formas.
+
+### Testes e token real
+
+A suíte usa um verificador de token falso, com o mesmo contrato do real, e roda
+sem rede e sem credencial. A autenticação com o Firebase de verdade é provada
+por um script, com a API rodando em outro terminal:
+
+```powershell
+$env:FIREBASE_WEB_API_KEY = "..."
+$env:SENHA_PACIENTE_A     = "..."
+$env:SENHA_PACIENTE_B     = "..."
+npm run verificar:token
+```
+
+O script não imprime token, senha nem chave.
 
 ## Licença
 
