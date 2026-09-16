@@ -12,7 +12,7 @@
  *
  *   const { iniciar, parar } = require('../helpers/servidor');
  *   let servidor;
- *   beforeAll(() => { servidor = iniciar(); });
+ *   beforeAll(async () => { servidor = await iniciar(); });
  *   afterAll(() => parar(servidor));
  *   // ...
  *   await request(servidor).get('/saude');

@@ -246,3 +246,57 @@ comportamento observável em vez da implementação.
 **92 testes passando**, em 8 suítes.
 
 ---
+
+## 16/09/2026 — Revisão do repositório completo
+
+Segunda revisão em nuvem, desta vez sobre os 50 arquivos do repositório
+inteiro — a primeira usara o commit inicial como base e deixara de fora todo o
+núcleo: entidades de domínio, as três migrations centrais e `config.js`. Cinco
+achados, todos verificados no código e todos procedentes.
+
+**Erros do analisador de corpo virando 500.** O `express.json()` roda antes de
+qualquer rota e levanta erros próprios: corpo acima do limite de 100 kB
+(`entity.too.large`, 413), codificação e conjunto de caracteres não suportados
+(415). O tratador só reconhecia JSON malformado, então todos os demais caíam no
+ramo genérico: o cliente recebia 500 com `ERRO_INTERNO` e o servidor registrava
+"erro não tratado" a cada requisição grande demais. Duas consequências —
+o cliente não conseguia distinguir violação de tamanho de falha real do
+servidor, e o monitoramento ficaria poluído de falsos erros internos, onde
+falhas de verdade se esconderiam. Corrigido com um mapa dos tipos conhecidos e
+uma rede de segurança que impede qualquer erro já declarado como 4xx de virar
+500.
+
+**ROLLBACK sem isolamento em `transacao`.** Se o `ROLLBACK` de limpeza também
+falhasse — o que acontece justamente quando a conexão caiu, que costuma ser a
+causa do erro original —, a falha do `ROLLBACK` substituía o erro real, e o
+cliente voltava ao pool sem ser destruído. O próximo a pegá-lo receberia
+"current transaction is aborted" sem ter feito nada. Agora o erro original é
+sempre propagado, e o cliente é devolvido com o erro quando o `ROLLBACK` falha,
+o que faz o `pg` destruí-lo. O momento de corrigir era este: `transacao` ainda
+não tem nenhum chamador, e a Etapa 6 inteira vai depender dela.
+
+**Restrição que não cumpria o próprio comentário.** A migration 003 descrevia
+`pagamento.ambiente` como trava impedindo linhas de produção, mas a restrição
+era `CHECK (ambiente IN ('sandbox','producao'))` — aceitava 'producao' em
+silêncio. Comentário e schema diziam coisas diferentes, e o comentário é o que
+um mantenedor lê antes de decidir se precisa de proteção na aplicação. A
+migration 005 aperta para `CHECK (ambiente = 'sandbox')`, alinhando o banco ao
+que a Seção 3.9.5 do projeto declara. Verificado na prática: um INSERT com
+'producao' agora é recusado pelo banco.
+
+**Healthcheck sem prazo próprio.** `GET /saude` aguardava o `SELECT 1` pelo
+tempo de conexão do pool — 15 s em TCP, 30 s por WebSocket. Durante a
+hibernação do Neon, cada sondagem seguraria um processo de trabalho por esse
+período inteiro antes de responder, o oposto do que um healthcheck existe para
+fazer, e uma rajada esgotaria a capacidade da API enquanto ela apenas parecia
+lenta. Passou a ter prazo de 3 segundos, respondendo 503 ao estourar.
+
+**Exemplo de uso desatualizado** no cabeçalho de `tests/helpers/servidor.js`,
+mostrando `iniciar()` sem `await` depois que a função virou assíncrona.
+
+Os dois achados com comportamento observável ganharam teste de regressão,
+confirmada na prática: revertendo o tratador de erros, dois testes falham.
+
+**95 testes passando.**
+
+---

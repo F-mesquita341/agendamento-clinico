@@ -62,16 +62,34 @@ function consultar(sql, valores) {
 
 async function transacao(execucao) {
   const cliente = await pool.connect();
+  let devolvido = false;
+
   try {
     await cliente.query('BEGIN');
     const resultado = await execucao(cliente);
     await cliente.query('COMMIT');
+    cliente.release();
+    devolvido = true;
     return resultado;
   } catch (erro) {
-    await cliente.query('ROLLBACK');
+    if (!devolvido) {
+      try {
+        await cliente.query('ROLLBACK');
+        cliente.release();
+      } catch (falhaNoRollback) {
+        // O ROLLBACK falha tipicamente quando a própria conexão caiu — que é,
+        // quase sempre, o que causou o erro original. Devolver o cliente ao
+        // pool COM o erro faz o `pg` destruí-lo, em vez de reaproveitar uma
+        // conexão cujo estado transacional é desconhecido: sem isto, o próximo
+        // a pegá-la receberia "current transaction is aborted" sem ter feito
+        // nada de errado.
+        cliente.release(falhaNoRollback);
+      }
+    }
+
+    // Propaga sempre o erro ORIGINAL. A falha do ROLLBACK é consequência, não
+    // causa, e deixá-la substituir o erro real esconderia o que aconteceu.
     throw erro;
-  } finally {
-    cliente.release();
   }
 }
 

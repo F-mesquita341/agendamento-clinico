@@ -247,3 +247,44 @@ describe('termo de busca repetido na query', () => {
     expect(r.body.erro.problemas[0].mensagem).toBe('Informe um único termo de busca.');
   });
 });
+
+describe('erros do analisador de corpo', () => {
+  test('corpo acima do limite é 413, não 500', async () => {
+    const gigante = { texto: 'x'.repeat(200 * 1024) };
+
+    const r = await request(servidor)
+      .post('/profissionais')
+      .set('Content-Type', 'application/json')
+      .send(gigante);
+
+    expect(r.status).toBe(413);
+    expect(r.body.erro.codigo).toBe('CORPO_GRANDE_DEMAIS');
+  });
+
+  test('JSON malformado é 400, não 500', async () => {
+    const r = await request(servidor)
+      .post('/profissionais')
+      .set('Content-Type', 'application/json')
+      .send('{"isto": nao e json}');
+
+    expect(r.status).toBe(400);
+    expect(r.body.erro.codigo).toBe('JSON_INVALIDO');
+  });
+
+  test('nenhum problema de envio do cliente aparece como erro interno', async () => {
+    const casos = [
+      ['{"a":', 'application/json'],
+      ['x'.repeat(200 * 1024), 'application/json'],
+    ];
+
+    for (const [corpo, tipo] of casos) {
+      const r = await request(servidor)
+        .post('/rota-qualquer')
+        .set('Content-Type', tipo)
+        .send(corpo);
+
+      expect(r.status).toBeLessThan(500);
+      expect(r.body.erro.codigo).not.toBe('ERRO_INTERNO');
+    }
+  });
+});

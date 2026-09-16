@@ -15,6 +15,37 @@
 const { ErroDeDominio } = require('../../../domain/erros');
 const config = require('../../../config');
 
+/**
+ * Erros levantados pelo `express.json()` antes de qualquer rota rodar.
+ *
+ * Eles chegam com `type` e `status` próprios, e nenhum é falha do servidor —
+ * são todos problemas do que o cliente enviou. Sem este mapa, um corpo acima
+ * do limite viraria 500 com `ERRO_INTERNO`, e cada requisição grande demais
+ * apareceria no log como erro interno, escondendo falhas de verdade.
+ */
+const ERROS_DO_CORPO = {
+  'entity.parse.failed': {
+    status: 400,
+    codigo: 'JSON_INVALIDO',
+    mensagem: 'O corpo da requisição não é um JSON válido.',
+  },
+  'entity.too.large': {
+    status: 413,
+    codigo: 'CORPO_GRANDE_DEMAIS',
+    mensagem: 'O conteúdo enviado é maior do que o limite aceito.',
+  },
+  'encoding.unsupported': {
+    status: 415,
+    codigo: 'CODIFICACAO_NAO_SUPORTADA',
+    mensagem: 'A codificação do conteúdo enviado não é suportada.',
+  },
+  'charset.unsupported': {
+    status: 415,
+    codigo: 'CHARSET_NAO_SUPORTADO',
+    mensagem: 'O conjunto de caracteres do conteúdo enviado não é suportado.',
+  },
+};
+
 function rotaNaoEncontrada(req, res, next) {
   res.status(404).json({
     erro: {
@@ -41,11 +72,22 @@ function tratadorDeErro(erro, req, res, next) {
     });
   }
 
-  if (erro?.type === 'entity.parse.failed') {
-    return res.status(400).json({
+  const doCorpo = ERROS_DO_CORPO[erro?.type];
+  if (doCorpo) {
+    return res.status(doCorpo.status).json({
+      erro: { codigo: doCorpo.codigo, mensagem: doCorpo.mensagem, acao: null },
+    });
+  }
+
+  // Rede de segurança para qualquer outro erro que já se declare como falha do
+  // cliente — inclusive versões futuras do body-parser com tipos novos. Um 4xx
+  // nunca deve virar 500: são problemas distintos e exigem reação distinta de
+  // quem chamou.
+  if (Number.isInteger(erro?.status) && erro.status >= 400 && erro.status < 500) {
+    return res.status(erro.status).json({
       erro: {
-        codigo: 'JSON_INVALIDO',
-        mensagem: 'O corpo da requisição não é um JSON válido.',
+        codigo: 'REQUISICAO_INVALIDA',
+        mensagem: 'A requisição não pôde ser processada como enviada.',
         acao: null,
       },
     });
