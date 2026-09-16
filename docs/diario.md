@@ -208,3 +208,41 @@ prática — reintroduzindo cada defeito, os testes correspondentes falham.
 **77 testes passando.**
 
 ---
+
+## 15/09/2026 — Fechamento de lacunas antes das Etapas 5 e 6
+
+Análise da base antes de construir por cima dela. Duas lacunas identificadas e
+fechadas.
+
+**`CancelarConsulta` não tinha nenhum teste.** Um caso de uso inteiro sem
+cobertura, direta ou indireta — como ainda não existe endpoint de cancelamento,
+nada o exercitava. Escritos oito testes, entre eles a verificação de que a
+consulta cancelada **não é apagada**, apenas muda de estado: o registro é
+matéria-prima da análise de absenteísmo, que é o problema central do trabalho.
+Coberto também que o horário volta para a grade com a versão incrementada, e
+que outra pessoa consegue agendá-lo em seguida.
+
+**Os guardas de `config.js` só tinham verificação manual.** São eles que
+impedem a suíte — que apaga tabelas — de apontar para o banco de
+desenvolvimento. Passaram a ter sete testes, executados em processo filho,
+porque o módulo chama `process.exit` e isso não pode ser exercitado dentro do
+processo do Jest. O diretório de trabalho do filho é uma pasta temporária
+vazia, para que o `dotenv` não encontre o `.env` real e contamine o cenário.
+
+O caso mais importante é o do hostname: `-pooler` e o host direto do Neon
+alcançam o mesmo banco, e uma comparação de texto entre as duas URLs deixaria
+passar. Isso chegou a acontecer de verdade durante a configuração inicial.
+
+Ambos os conjuntos foram validados quebrando o código de propósito: removendo a
+verificação de dono no cancelamento e revertendo o guarda para comparação
+textual, cinco testes falham.
+
+**Cobertura restante.** Os adaptadores PostgreSQL, os apresentadores e os
+esquemas de validação não têm teste direto — são exercitados pelos testes de
+integração, que os atravessam por requisição HTTP real. É cobertura pela
+fronteira do contrato, e não por dentro, o que se considera adequado: testa o
+comportamento observável em vez da implementação.
+
+**92 testes passando**, em 8 suítes.
+
+---
