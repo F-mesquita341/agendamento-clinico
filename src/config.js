@@ -150,18 +150,50 @@ if (quantosCampos > 0 && quantosCampos < 3) {
 }
 
 if (config.GOOGLE_APPLICATION_CREDENTIALS) {
-  // Verificado aqui, na subida, porque o erro do próprio SDK só apareceria na
-  // primeira requisição autenticada — e como falha genérica de autenticação.
-  if (!require('fs').existsSync(config.GOOGLE_APPLICATION_CREDENTIALS)) {
+  // Verificado aqui, na subida. O SDK só lê o arquivo quando vai verificar o
+  // primeiro token — um arquivo ausente ou corrompido passaria despercebido até
+  // a primeira pessoa tentar entrar.
+  const caminho = config.GOOGLE_APPLICATION_CREDENTIALS;
+  const fs = require('fs');
+
+  if (!fs.existsSync(caminho)) {
+    abortar(`GOOGLE_APPLICATION_CREDENTIALS aponta para um arquivo que não existe:\n  ${caminho}`);
+  }
+
+  let chave;
+  try {
+    chave = JSON.parse(fs.readFileSync(caminho, 'utf8'));
+  } catch {
+    // A mensagem do JSON.parse não é repassada de propósito: no Node atual ela
+    // cita um trecho do texto inválido, que aqui seria um pedaço da chave privada.
     abortar(
-      'GOOGLE_APPLICATION_CREDENTIALS aponta para um arquivo que não existe:\n' +
-        `  ${config.GOOGLE_APPLICATION_CREDENTIALS}`
+      'GOOGLE_APPLICATION_CREDENTIALS aponta para um arquivo que não é um JSON válido:\n' +
+        `  ${caminho}\n` +
+        'Gere a chave de novo no console do Firebase, em Contas de serviço.'
     );
   }
+
+  const faltando = ['project_id', 'client_email', 'private_key'].filter(
+    (campo) => typeof chave?.[campo] !== 'string' || chave[campo] === ''
+  );
+  if (chave?.type !== 'service_account' || faltando.length > 0) {
+    abortar(
+      'GOOGLE_APPLICATION_CREDENTIALS não aponta para uma chave de conta de serviço completa:\n' +
+        `  ${caminho}\n` +
+        (faltando.length ? `Campos ausentes: ${faltando.join(', ')}.\n` : '') +
+        'Gere a chave de novo no console do Firebase, em Contas de serviço.'
+    );
+  }
+
+  config.projetoFirebase = chave.project_id;
 }
 
 config.credencialFirebase =
   quantosCampos === 3 ? 'campos' : config.GOOGLE_APPLICATION_CREDENTIALS ? 'arquivo' : null;
+
+if (config.credencialFirebase === 'campos') {
+  config.projetoFirebase = config.FIREBASE_PROJECT_ID;
+}
 
 // Em produção, sem credencial nenhuma, toda requisição autenticada falharia.
 // Melhor não subir do que subir aparentemente saudável.

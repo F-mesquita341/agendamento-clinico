@@ -146,6 +146,20 @@ describe('transporte do banco', () => {
 });
 
 describe('credencial do Firebase', () => {
+  /** Chave de conta de serviço com o formato certo e valores de mentira. */
+  const CHAVE_DE_EXEMPLO = {
+    type: 'service_account',
+    project_id: 'projeto-exemplo',
+    client_email: 'conta@projeto-exemplo.iam.gserviceaccount.com',
+    private_key: 'CHAVE-PRIVADA-DE-MENTIRA-QUE-NAO-PODE-VAZAR',
+  };
+
+  function arquivoDeCredencial(nome, conteudo) {
+    const arquivo = path.join(pastaSemEnv, nome);
+    fs.writeFileSync(arquivo, conteudo);
+    return arquivo;
+  }
+
   const CAMPOS = {
     FIREBASE_PROJECT_ID: 'projeto-exemplo',
     FIREBASE_CLIENT_EMAIL: 'conta@projeto-exemplo.iam.gserviceaccount.com',
@@ -166,8 +180,7 @@ describe('credencial do Firebase', () => {
   });
 
   test('em produção, com o caminho de um arquivo existente, sobe', () => {
-    const arquivo = path.join(pastaSemEnv, 'credencial-de-exemplo.json');
-    fs.writeFileSync(arquivo, '{}');
+    const arquivo = arquivoDeCredencial('credencial-de-exemplo.json', JSON.stringify(CHAVE_DE_EXEMPLO));
 
     const r = carregarConfig({
       NODE_ENV: 'production',
@@ -187,6 +200,62 @@ describe('credencial do Firebase', () => {
 
     expect(r.codigo).toBe(1);
     expect(r.saida).toMatch(/arquivo que não existe/);
+  });
+
+  test('arquivo que não é JSON válido é recusado na subida, sem ecoar o conteúdo', () => {
+    // A corrupção precisa ser do tipo que faz o V8 citar o texto de origem:
+    // valor sem aspas gera "Unexpected token 'C', ...\"ate_key\": CHAVE-PRIV\"...".
+    // Um JSON apenas truncado gera "Unterminated string", sem trecho nenhum — e
+    // com ele este teste passaria mesmo com o vazamento, sem medir nada. Isso
+    // foi constatado reintroduzindo o defeito.
+    const { private_key: _chave, ...semChave } = CHAVE_DE_EXEMPLO;
+    const arquivo = arquivoDeCredencial(
+      'corrompido.json',
+      JSON.stringify(semChave).slice(0, -1) + ',"private_key": CHAVE-PRIVADA-DE-MENTIRA}'
+    );
+
+    const r = carregarConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: DIRETO,
+      GOOGLE_APPLICATION_CREDENTIALS: arquivo,
+    });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/não é um JSON válido/);
+    // O V8 cita só uns dez caracteres ao redor do erro: procurar o texto inteiro
+    // não detectaria o vazamento de um fragmento.
+    expect(r.saida).not.toMatch(/CHAVE-PRIV/);
+  });
+
+  test('JSON sem os campos de uma conta de serviço é recusado, citando só os nomes', () => {
+    const { private_key: _removida, ...semChave } = CHAVE_DE_EXEMPLO;
+    const arquivo = arquivoDeCredencial('incompleto.json', JSON.stringify(semChave));
+
+    const r = carregarConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: DIRETO,
+      GOOGLE_APPLICATION_CREDENTIALS: arquivo,
+    });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/Campos ausentes: private_key/);
+    expect(r.saida).not.toMatch(/conta@projeto-exemplo/);
+  });
+
+  test('JSON de outro tipo de credencial é recusado', () => {
+    const arquivo = arquivoDeCredencial(
+      'outro-tipo.json',
+      JSON.stringify({ ...CHAVE_DE_EXEMPLO, type: 'authorized_user' })
+    );
+
+    const r = carregarConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: DIRETO,
+      GOOGLE_APPLICATION_CREDENTIALS: arquivo,
+    });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/conta de serviço completa/);
   });
 
   test('variáveis FIREBASE_* incompletas são recusadas', () => {

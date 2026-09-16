@@ -16,9 +16,16 @@
  * sistema que está quebrado do lado de cá, e esconderia a falha do
  * monitoramento. Por isso a tradução usa uma lista fechada de códigos.
  *
- * O Admin SDK só é inicializado na primeira requisição autenticada. A suíte de
- * testes injeta um verificador falso e nunca chega aqui — o que permite rodá-la
- * sem rede e sem credencial, inclusive na integração contínua.
+ * Carregamento: o servidor chama `preparar()` na subida, para que o SDK — que
+ * são centenas de arquivos — seja carregado antes da primeira requisição, e não
+ * durante ela. Carregá-lo sob demanda fazia a primeira pessoa autenticada
+ * esperar, e sob `node --watch` no Windows chegou a derrubar a conexão: a
+ * leitura inicial desses arquivos foi tomada por mudança e reiniciou a API no
+ * meio da resposta.
+ *
+ * Sem `preparar()`, o carregamento continua sob demanda. A suíte de testes
+ * injeta um verificador falso e nunca chega aqui — o que permite rodá-la sem
+ * rede e sem credencial, inclusive na integração contínua.
  */
 
 const config = require('../../config');
@@ -66,7 +73,7 @@ function criarVerificadorFirebase({ auth } = {}) {
     return autenticador;
   }
 
-  return async function verificarToken(token) {
+  async function verificarToken(token) {
     let decodificado;
     try {
       // checkRevoked = false: verificar revogação exigiria uma chamada aos
@@ -84,7 +91,17 @@ function criarVerificadorFirebase({ auth } = {}) {
     }
 
     return { uid: decodificado.uid, email: decodificado.email ?? null };
+  }
+
+  /**
+   * Carrega o SDK e inicializa o app imediatamente. Idempotente: chamadas
+   * seguintes reaproveitam a instância já criada.
+   */
+  verificarToken.preparar = () => {
+    obterAutenticador();
   };
+
+  return verificarToken;
 }
 
 module.exports = { criarVerificadorFirebase };
