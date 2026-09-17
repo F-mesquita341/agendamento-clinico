@@ -88,7 +88,10 @@ class HorariosFalsos {
 
   async liberar(horarioId) {
     const horario = this.horarios.get(String(horarioId));
-    if (!horario) return false;
+    // Mesma cláusula do adaptador: `WHERE id = $1 AND status = 'reservado'`.
+    // Horário bloqueado pela clínica não volta à grade por causa de um
+    // cancelamento.
+    if (!horario || horario.status !== STATUS_HORARIO.RESERVADO) return false;
     horario.status = STATUS_HORARIO.DISPONIVEL;
     horario.versao += 1;
     return true;
@@ -111,8 +114,24 @@ class ConsultasFalsas {
     return this.itens.get(String(id)) ?? null;
   }
 
-  async doPaciente(pacienteId) {
-    return [...this.itens.values()].filter((c) => c.pertenceAo(pacienteId));
+  /**
+   * Mesma forma do adaptador: página de LEITURAS e total do conjunto.
+   *
+   * O `profissional` vem nulo porque este dublê não conhece profissionais — ele
+   * sabe MENOS que o adaptador real, e não mais, que é o lado seguro. Quem
+   * exercita a leitura composta são os testes de integração.
+   */
+  async doPaciente({ pacienteId, limite = 20, deslocamento = 0 }) {
+    const dele = [...this.itens.values()].filter((c) => c.pertenceAo(pacienteId));
+    const pagina = dele.slice(deslocamento, deslocamento + limite);
+    return {
+      itens: pagina.map((consulta) => ({
+        consulta,
+        horario: this.horarioDaConsulta.get(String(consulta.id)) ?? null,
+        profissional: null,
+      })),
+      total: dele.length,
+    };
   }
 
   async existeAtivaNoIntervalo(pacienteId, inicio, fim) {
@@ -127,7 +146,13 @@ class ConsultasFalsas {
 
   async cancelar(consultaId) {
     const consulta = this.itens.get(String(consultaId));
-    if (!consulta) return null;
+    // O adaptador real lê a consulta sob `FOR UPDATE` e deixa o domínio decidir
+    // antes de escrever. Sem repetir isso aqui, o dublê aceitaria cancelar duas
+    // vezes e um teste de caso de uso passaria sobre esse defeito.
+    if (!consulta) {
+      throw new NaoEncontrado('Consulta');
+    }
+    consulta.garantirQuePodeSerCancelada();
     consulta.status = STATUS_CONSULTA.CANCELADA;
     const h = this.horarioDaConsulta.get(String(consultaId));
     if (h) await this.horarios.liberar(h.id);
