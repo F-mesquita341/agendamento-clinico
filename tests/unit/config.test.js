@@ -258,6 +258,20 @@ describe('credencial do Firebase', () => {
     expect(r.saida).toMatch(/conta de serviço completa/);
   });
 
+  test('com FIREBASE_* completas, um caminho de arquivo antigo não impede a subida', () => {
+    // Situação típica de migração no painel do provedor: as variáveis novas
+    // foram definidas e o caminho antigo ficou esquecido, apontando para nada.
+    const r = carregarConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: DIRETO,
+      ...CAMPOS,
+      GOOGLE_APPLICATION_CREDENTIALS: path.join(pastaSemEnv, 'removido-ha-tempos.json'),
+    });
+
+    expect(r.codigo).toBe(0);
+    expect(r.saida).toMatch(/ignorada/);
+  });
+
   test('variáveis FIREBASE_* incompletas são recusadas', () => {
     const { FIREBASE_PRIVATE_KEY, ...semAChave } = CAMPOS;
 

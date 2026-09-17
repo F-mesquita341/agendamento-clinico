@@ -12,7 +12,7 @@
  * por outro caminho no futuro.
  */
 
-const { NaoEncontrado, RegraDeNegocio } = require('../domain/erros');
+const { RegraDeNegocio } = require('../domain/erros');
 
 const CAMPOS_ALTERAVEIS = Object.freeze(['nome', 'telefone', 'dataNascimento']);
 
@@ -35,10 +35,9 @@ class AtualizarPerfil {
       );
     }
 
-    if (!(await this.pacientes.porId(pacienteId))) {
-      throw new NaoEncontrado('Paciente');
-    }
-
+    // Sem leitura prévia do paciente: a rota já o resolveu pelo token, e o
+    // repositório lança NaoEncontrado se o UPDATE não alcançar nenhuma linha.
+    // Ler antes seria uma ida a mais ao banco em todo PATCH, sem proteger nada.
     return this.pacientes.atualizar(pacienteId, campos);
   }
 }

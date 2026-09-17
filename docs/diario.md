@@ -469,3 +469,39 @@ A execução anterior, às 16:37, havia falhado por queda da conexão — regist
 na entrada sobre o carregamento do Firebase Admin na subida, que foi a correção.
 
 ---
+
+## 16/09/2026 — Revisão em nuvem da Etapa 5
+
+Terceira revisão multi-agente, sobre os 30 arquivos da Etapa 5. Três achados,
+todos de gravidade baixa, todos verificados no código e procedentes. Nenhum
+conflitou com decisão tomada de propósito.
+
+**"Hoje" calculado em UTC.** A validação de data de nascimento comparava a data
+informada com `new Date().toISOString()`, que é o dia em UTC. Em Quixadá, entre
+21h e meia-noite, o UTC já está no dia seguinte — e a data de amanhã passava
+como data de nascimento válida. O servidor de hospedagem costuma rodar em UTC,
+então o problema não depende da máquina de desenvolvimento. Corrigido calculando
+o dia civil no fuso da clínica, `America/Fortaleza`, o mesmo do seed. Testado
+com relógio simulado às 22h30 locais.
+
+**Leitura redundante no `AtualizarPerfil`.** O caso de uso lia o paciente só para
+lançar 404, mas a rota já o havia resolvido pelo token e o adaptador já lança
+404 quando o UPDATE não alcança nenhuma linha. Cada PATCH fazia uma ida a mais
+ao banco. A leitura saiu, o contrato do repositório passou a declarar o 404, e o
+dublê passou a espelhá-lo — sem isso, o dublê montaria um paciente a partir de
+`undefined` e o teste passaria sobre o defeito, a mesma armadilha já registrada
+duas vezes neste diário.
+
+**Arquivo de credencial validado mesmo sem ser usado.** Quando as três variáveis
+`FIREBASE_*` estão definidas, elas têm prioridade sobre o arquivo — mas o arquivo
+era validado antes dessa decisão. Um caminho antigo esquecido no painel do
+provedor, durante a migração de uma forma de credencial para a outra, impediria
+a API de subir. Agora o arquivo só é validado quando é a credencial em uso; se as
+duas formas estiverem presentes, a subida emite aviso para remover a que sobra.
+
+Os três achados ganharam teste, e cada teste foi confirmado reintroduzindo o
+defeito correspondente: três falhas.
+
+**187 testes passando.**
+
+---

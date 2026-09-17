@@ -149,7 +149,16 @@ if (quantosCampos > 0 && quantosCampos < 3) {
   );
 }
 
-if (config.GOOGLE_APPLICATION_CREDENTIALS) {
+if (config.GOOGLE_APPLICATION_CREDENTIALS && quantosCampos === 3) {
+  // As variáveis FIREBASE_* têm prioridade, então o arquivo não será usado — e
+  // por isso também não é validado. Validá-lo impediria a subida por causa de
+  // um caminho antigo esquecido no painel, justamente durante a migração de
+  // uma forma de credencial para a outra.
+  console.warn(
+    'Aviso: GOOGLE_APPLICATION_CREDENTIALS ignorada — as variáveis FIREBASE_* estão\n' +
+      'definidas e têm prioridade. Remova a que não estiver em uso.'
+  );
+} else if (config.GOOGLE_APPLICATION_CREDENTIALS) {
   // Verificado aqui, na subida. O SDK só lê o arquivo quando vai verificar o
   // primeiro token — um arquivo ausente ou corrompido passaria despercebido até
   // a primeira pessoa tentar entrar.

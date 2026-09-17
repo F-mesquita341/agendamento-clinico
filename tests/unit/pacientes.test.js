@@ -193,6 +193,17 @@ describe('AtualizarPerfil', () => {
     ).rejects.toMatchObject({ codigo: 'NADA_A_ATUALIZAR', status: 422 });
   });
 
+  test('paciente inexistente é 404, sem registro de auditoria', async () => {
+    const { atualizar, pacientes } = await comDoisPacientes();
+    const auditoriaAntes = pacientes.auditoria.length;
+
+    await expect(
+      atualizar.executar({ pacienteId: 999999, alteracoes: { nome: 'Ninguém' } })
+    ).rejects.toMatchObject({ codigo: 'NAO_ENCONTRADO', status: 404 });
+
+    expect(pacientes.auditoria).toHaveLength(auditoriaAntes);
+  });
+
   test('a auditoria guarda os nomes dos campos, não os valores', async () => {
     const { atualizar, pacientes, a } = await comDoisPacientes();
 

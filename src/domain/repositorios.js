@@ -135,6 +135,9 @@ class RepositorioDePacientes {
    * Atualiza apenas os campos informados e registra em auditoria os NOMES dos
    * campos alterados — nunca os valores.
    *
+   * Lança `NaoEncontrado` se o paciente não existir. O caso de uso confia nisso
+   * e não faz leitura prévia.
+   *
    * @param {number} _id
    * @param {{nome?: string, telefone?: string|null, dataNascimento?: string|null}} _campos
    * @returns {Promise<import('./Paciente').Paciente>}

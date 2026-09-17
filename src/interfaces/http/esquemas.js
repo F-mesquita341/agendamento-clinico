@@ -83,13 +83,37 @@ function telefone() {
 }
 
 /**
+ * Fuso civil da clínica parceira, em Quixadá (CE) — o mesmo usado no seed.
+ * Sem horário de verão desde 2019.
+ */
+const FUSO_DA_CLINICA = 'America/Fortaleza';
+
+/**
+ * Data de calendário (AAAA-MM-DD) de um instante, no fuso informado.
+ *
+ * `toISOString()` daria a data em UTC. No Brasil, entre 21h e meia-noite, o UTC
+ * já está no dia seguinte — e "hoje" viraria amanhã, deixando passar como data
+ * de nascimento uma data que ainda não chegou. O servidor de hospedagem, além
+ * disso, costuma rodar em UTC, longe do fuso de quem usa o aplicativo.
+ */
+function dataCivil(instante, fuso = FUSO_DA_CLINICA) {
+  // O formato en-CA já é AAAA-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: fuso,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instante);
+}
+
+/**
  * Data de calendário no formato AAAA-MM-DD, sem hora e sem fuso.
  *
  * Confere que a data existe de fato — "2026-02-30" tem o formato certo e não
  * é um dia — e que não está no futuro.
  */
 function dataDeNascimento() {
-  const hoje = () => new Date().toISOString().slice(0, 10);
+  const hoje = () => dataCivil(new Date());
   const existe = (texto) => {
     const instante = new Date(`${texto}T00:00:00Z`);
     return !Number.isNaN(instante.getTime()) && instante.toISOString().slice(0, 10) === texto;
@@ -120,6 +144,8 @@ function dataDeNascimento() {
 }
 
 module.exports = {
+  FUSO_DA_CLINICA,
+  dataCivil,
   inteiroPositivo,
   data,
   objetoEstrito,

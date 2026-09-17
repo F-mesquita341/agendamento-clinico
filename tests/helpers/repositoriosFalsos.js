@@ -19,7 +19,7 @@ const { Consulta, STATUS_CONSULTA } = require('../../src/domain/Consulta');
 const { Horario, STATUS_HORARIO } = require('../../src/domain/Horario');
 const { Dinheiro } = require('../../src/domain/Dinheiro');
 const { Paciente } = require('../../src/domain/Paciente');
-const { PacienteJaCadastrado } = require('../../src/domain/erros');
+const { NaoEncontrado, PacienteJaCadastrado } = require('../../src/domain/erros');
 
 /** Preço cobrado quando o teste não especifica outro. */
 const PRECO_PADRAO = 15000;
@@ -200,6 +200,12 @@ class PacientesFalsos {
 
   async atualizar(id, campos) {
     const atual = this.itens.get(String(id));
+    // Mesmo contrato do adaptador PostgreSQL: paciente inexistente é 404. Sem
+    // isto, o dublê montaria um paciente a partir de `undefined` e o teste do
+    // caso de uso passaria sobre um defeito.
+    if (!atual) {
+      throw new NaoEncontrado('Paciente');
+    }
     const atualizado = new Paciente({ ...atual, ...campos });
     this.itens.set(String(id), atualizado);
     this.auditoria.push({
