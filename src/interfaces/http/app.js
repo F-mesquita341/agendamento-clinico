@@ -23,6 +23,7 @@ const saude = require('./rotas/saude');
 const especialidades = require('./rotas/especialidades');
 const profissionais = require('./rotas/profissionais');
 const { criarRotasDePacientes } = require('./rotas/pacientes');
+const { criarRotasDeConsultas } = require('./rotas/consultas');
 const { criarVerificadorFirebase } = require('../../infra/firebase/verificadorDeToken');
 const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
 
@@ -38,9 +39,7 @@ function criarApp({ verificarToken = criarVerificadorFirebase(), pacientes, relo
   app.use('/especialidades', especialidades);
   app.use('/profissionais', profissionais);
   app.use('/pacientes', criarRotasDePacientes({ verificarToken, pacientes, relogio }));
-
-  // A partir da Etapa 6:
-  // app.use('/consultas', criarRotasDeConsultas({ verificarToken, ... }));
+  app.use('/consultas', criarRotasDeConsultas({ verificarToken, pacientes, relogio }));
 
   app.use(rotaNaoEncontrada);
   app.use(tratadorDeErro);

@@ -62,4 +62,27 @@ function paciente(p) {
   };
 }
 
-module.exports = { especialidade, profissional, horario, paciente };
+/**
+ * Consulta agendada.
+ *
+ * O horário e o profissional são opcionais de propósito: a resposta do
+ * agendamento sai da própria transação, que devolve só a consulta, enquanto as
+ * telas de lista e de detalhe recebem a leitura composta, com os dois. O
+ * `horarioId` aparece sempre, para o aplicativo não precisar de um caso
+ * especial.
+ */
+function consulta(c, { horario: h, profissional: p } = {}) {
+  return {
+    id: c.id,
+    status: c.status,
+    horarioId: c.horarioId,
+    valorCentavos: c.valor.centavos,
+    valorFormatado: c.valor.formatar(),
+    reservaExpiraEm: c.reservaExpiraEm ? c.reservaExpiraEm.toISOString() : null,
+    criadoEm: c.criadoEm ? c.criadoEm.toISOString() : null,
+    ...(h ? { horario: horario(h) } : {}),
+    ...(p ? { profissional: profissional(p) } : {}),
+  };
+}
+
+module.exports = { especialidade, profissional, horario, paciente, consulta };
