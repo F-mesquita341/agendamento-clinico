@@ -166,6 +166,34 @@ algum caminho futuro esqueça de comparar a versão. Ele é *parcial* — ignora
 consultas canceladas — porque um horário cancelado precisa voltar a ser
 agendável, enquanto o registro do cancelamento permanece para o histórico.
 
+## Agendamento
+
+| Rota | O que faz |
+|---|---|
+| `POST /consultas` | Agenda, com `{ horarioId, versao }` lidos da grade |
+| `GET /consultas` | Lista as consultas do paciente do token, paginadas |
+| `GET /consultas/:id` | Detalhe de uma consulta própria |
+| `PATCH /consultas/:id/cancelamento` | Cancela e devolve o horário à grade |
+
+O fluxo do aplicativo é: ler a grade em `GET /profissionais/:id/horarios`,
+guardar a `versao` de cada horário e reenviá-la ao agendar. A consulta nasce em
+`pendente_pagamento`, com o valor do profissional congelado no ato e uma reserva
+válida por `RESERVA_MINUTOS` (15 por padrão).
+
+Cancelar **não apaga** a consulta: ela muda para `cancelada` e continua no
+histórico, que é a matéria-prima da análise de absenteísmo. O horário volta para
+`disponivel` com a versão incrementada de novo — quem ainda tiver a versão
+anterior em mãos precisa recarregar a grade.
+
+| Código | Ação indicada | Quando |
+|---|---|---|
+| `HORARIO_INDISPONIVEL` (409) | `recarregar_horarios` | Outra pessoa reservou o horário primeiro |
+| `CONSULTA_SOBREPOSTA` (422) | — | O paciente já tem consulta ativa no mesmo intervalo |
+| `HORARIO_NO_PASSADO` (422) | — | O horário já começou |
+| `PROFISSIONAL_INDISPONIVEL` (422) | — | O profissional foi desativado |
+| `CONSULTA_JA_CANCELADA` (422) | — | Cancelamento repetido |
+| `ACESSO_NEGADO` (403) | — | A consulta pertence a outro paciente |
+
 ## Autenticação
 
 A identidade é do Firebase Authentication. O aplicativo faz login no Firebase e
@@ -219,8 +247,9 @@ produção, a API não sobe sem uma das duas formas.
 ### Testes e token real
 
 A suíte usa um verificador de token falso, com o mesmo contrato do real, e roda
-sem rede e sem credencial. A autenticação com o Firebase de verdade é provada
-por um script, com a API rodando em outro terminal:
+sem rede e sem credencial. A autenticação com o Firebase de verdade — e, com
+ela, o agendamento disputado entre dois pacientes — é provada por um script, com
+a API rodando em outro terminal:
 
 ```powershell
 $env:FIREBASE_WEB_API_KEY = "..."

@@ -505,3 +505,75 @@ defeito correspondente: três falhas.
 **187 testes passando.**
 
 ---
+
+## 17/09/2026 — Etapa 6: agendamento com lock otimista
+
+O domínio e os casos de uso estavam prontos desde a Etapa 3, mas rodavam só
+contra dublês em memória: `RepositorioDeHorariosPg` era leitura pura e
+`RepositorioDeConsultasPg` não existia. Esta etapa ligou as peças ao PostgreSQL
+e as expôs por HTTP. Nenhuma migration — tabelas, coluna `versao` e índice
+parcial vieram da Etapa 2.
+
+**O lock otimista cabe em um UPDATE.** `WHERE id = $1 AND versao = $2 AND status
+= 'disponivel'`. Sob concorrência, a segunda transação fica bloqueada na linha
+até a primeira confirmar; quando o bloqueio sai, o PostgreSQL reavalia o WHERE
+sobre a linha já atualizada, a versão não confere mais e o UPDATE não alcança
+nenhuma linha. Não existe "ler, decidir, escrever": a decisão é a própria
+escrita. O adaptador devolve `null`, e o caso de uso traduz em 409.
+
+**O preço é lido do profissional dentro da transação** e congelado na consulta.
+Um reajuste amanhã não altera consulta marcada hoje. É o mesmo ponto em que o
+`horario.valorCentavos` fantasma tinha se escondido na Etapa 3.
+
+**Profissional desativado passou a ser recusado.** Desativar tira os horários
+das listagens, mas um aplicativo com a tela antiga aberta ainda conseguiria
+agendar. A verificação acontece depois do UPDATE, e o ROLLBACK desfaz a reserva
+— o teste confere que o horário continua disponível na versão original.
+
+**O teste de concorrência revelou algo para a Etapa 7.** Vinte requisições
+simultâneas do mesmo paciente produzem um 201 e dezenove recusas, mas as
+recusas vêm em dois sabores: 409 quando perderam a disputa pela versão, e 422
+`CONSULTA_SOBREPOSTA` quando a checagem prévia rodou depois de a vencedora ter
+gravado — nesse instante o horário já conflita com a agenda do próprio paciente.
+Ambas são recusas legítimas, mas o teste de carga da Etapa 7 precisa usar
+pacientes distintos, ou o resultado publicado misturaria dois fenômenos.
+
+**Um teste verde que não provava nada.** O caso mais instrutivo do dia: o teste
+de dois cancelamentos simultâneos via HTTP passou mesmo depois de eu remover a
+trava do adaptador. Motivo: a checagem prévia do caso de uso pegava o segundo
+pedido antes de ele chegar ao banco — o que depende de tempo, não de garantia.
+A trava verdadeira só é exercitada quando os dois pedidos leem o estado antes de
+qualquer um gravar. Escrevi então um teste que chama o adaptador diretamente,
+sem passar pelo caso de uso, e ele falha sem a trava. Terceira vez neste diário
+que um teste verde escondia um defeito, e a terceira vez em que só reintroduzir
+o defeito revelou isso.
+
+**Cancelar relê sob bloqueio.** O plano previa `WHERE status <> 'cancelada'` no
+UPDATE; acabou melhor: `SELECT ... FOR UPDATE` e a verificação do próprio
+domínio, `Consulta.garantirQuePodeSerCancelada()`, extraída do método que já
+existia. Assim a mensagem certa para cada estado continua morando num lugar só,
+e o adaptador não duplica regra de negócio.
+
+**Por que isso importa:** sem essa trava, um cancelamento reenviado — dedo duplo
+no botão, aplicativo repetindo depois de uma queda de rede — liberaria um
+horário que outra pessoa já teria reservado no intervalo. O teste que prova isso
+é o de "cancelamento repetido não rouba o horário de quem reservou depois".
+
+**`liberar` nasceu com chamador.** Em vez de esperar a rotina de expiração da
+Etapa 8, recebe um `executor` opcional e é usado pelo cancelamento dentro da
+transação. Só age sobre horário `reservado`: o que a clínica bloqueou continua
+bloqueado.
+
+**Leitura composta.** As telas mostram data, profissional e especialidade junto
+com a consulta, então `doPaciente` devolve `{ consulta, horario, profissional }`
+por JOIN, e não uma requisição por item. As traduções de linha para entidade são
+reaproveitadas dos outros adaptadores — o horário que aparece na consulta é
+montado pelo mesmo código que monta a grade.
+
+Cinco defeitos reintroduzidos de propósito, cinco falhas no teste esperado:
+comparação de versão, trava do cancelamento, preço do profissional, profissional
+inativo e o middleware que resolve o paciente do token.
+
+**219 testes passando.**
+
+---
