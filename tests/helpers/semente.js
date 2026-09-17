@@ -12,6 +12,7 @@
  */
 
 const { consultar } = require('../../src/infra/db/pool');
+const { VERSAO_TERMO_CONSENTIMENTO } = require('../../src/domain/Paciente');
 
 /** Ordem inversa às dependências de chave estrangeira. */
 async function limpar() {
@@ -68,6 +69,18 @@ async function semear() {
     [jose.id]
   );
 
+  // Um horário da Inês no MESMO instante do "amanhã" do José — é com ele que se
+  // testa a sobreposição na agenda do paciente —, e um do profissional
+  // desativado, que não pode ser agendado por ninguém.
+  const { rows: outros } = await consultar(
+    `INSERT INTO horario (profissional_id, inicio, fim, status, versao)
+     VALUES
+       ($1, $3::timestamptz, $3::timestamptz + interval '30 minutes', 'disponivel', 0),
+       ($2, now() + interval '1 day', now() + interval '1 day 30 minutes', 'disponivel', 0)
+     RETURNING id`,
+    [ines.id, inativo.id, horarios[1].inicio]
+  );
+
   return {
     clinicaId: Number(clinicaId),
     especialidades: {
@@ -84,8 +97,33 @@ async function semear() {
       amanha: Number(horarios[1].id),
       comVersao7: Number(horarios[2].id),
       reservado: Number(horarios[3].id),
+      // Mesmo instante do `amanha`, com outro profissional.
+      amanhaComInes: Number(outros[0].id),
+      deProfissionalInativo: Number(outros[1].id),
     },
   };
 }
 
-module.exports = { semear, limpar };
+/**
+ * Dois pacientes já cadastrados, com os uids que `tokenDe` produz nos testes.
+ *
+ * Inseridos direto no banco, e não por `POST /pacientes`: o cadastro tem
+ * arquivo de teste próprio, e gastar duas requisições HTTP em cada caso de
+ * agendamento só tornaria a suíte mais lenta sem provar nada de novo.
+ */
+async function semearPacientes() {
+  const { rows } = await consultar(
+    `INSERT INTO paciente
+       (firebase_uid, nome, email, consentimento_versao, consentimento_em)
+     VALUES
+       ('uid-paciente-a', 'Ana Paciente',   'paciente.a@example.com', $1, now()),
+       ('uid-paciente-b', 'Bruno Paciente', 'paciente.b@example.com', $1, now())
+     RETURNING id, firebase_uid`,
+    [VERSAO_TERMO_CONSENTIMENTO]
+  );
+
+  const porUid = (uid) => Number(rows.find((r) => r.firebase_uid === uid).id);
+  return { a: porUid('uid-paciente-a'), b: porUid('uid-paciente-b') };
+}
+
+module.exports = { semear, semearPacientes, limpar };
