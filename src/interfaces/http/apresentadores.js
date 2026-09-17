@@ -44,4 +44,22 @@ function horario(h) {
   };
 }
 
-module.exports = { especialidade, profissional, horario };
+/**
+ * O `firebaseUid` fica de fora de propósito: é identificador interno da conta
+ * no provedor de autenticação, e o aplicativo não precisa dele para nada.
+ */
+function paciente(p) {
+  return {
+    id: p.id,
+    nome: p.nome,
+    email: p.email,
+    telefone: p.telefone,
+    dataNascimento: p.dataNascimento,
+    consentimento: {
+      versao: p.consentimentoVersao,
+      aceitoEm: p.consentimentoEm ? p.consentimentoEm.toISOString() : null,
+    },
+  };
+}
+
+module.exports = { especialidade, profissional, horario, paciente };

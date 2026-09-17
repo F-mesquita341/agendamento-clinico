@@ -31,9 +31,27 @@ const esquema = z.object({
   // driver do Neon na 443, para redes que bloqueiam a porta do banco.
   // Ver src/infra/db/driver.js.
   TRANSPORTE_BANCO: z.enum(['tcp', 'websocket']).default('tcp'),
+
+  // Credencial do Firebase Admin, em uma de duas formas:
+  //   arquivo — GOOGLE_APPLICATION_CREDENTIALS com o CAMINHO do JSON da conta
+  //             de serviço. Usada no desenvolvimento: a chave fica no arquivo,
+  //             fora do repositório, e nunca passa por este processo como texto.
+  //   campos  — as três variáveis FIREBASE_*, para serviços como o Render, onde
+  //             não há arquivo e as variáveis ficam no painel do provedor.
+  GOOGLE_APPLICATION_CREDENTIALS: z.string().min(1).optional(),
+  FIREBASE_PROJECT_ID: z.string().min(1).optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().min(1).optional(),
+  FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
 });
 
-const resultado = esquema.safeParse(process.env);
+// Variável definida com valor vazio (`CHAVE=`) conta como não definida. É o
+// que acontece com quem copia o .env.example e não preenche os campos
+// opcionais — e isso não pode impedir a API de subir.
+const ambiente = Object.fromEntries(
+  Object.entries(process.env).filter(([, valor]) => valor !== '')
+);
+
+const resultado = esquema.safeParse(ambiente);
 
 if (!resultado.success) {
   const linhas = resultado.error.issues.map(
@@ -113,6 +131,86 @@ if (config.NODE_ENV === 'test') {
     );
   }
   config.urlDoBanco = config.DATABASE_URL;
+}
+
+// --- Credencial do Firebase ---------------------------------------------------
+
+const camposFirebase = [
+  config.FIREBASE_PROJECT_ID,
+  config.FIREBASE_CLIENT_EMAIL,
+  config.FIREBASE_PRIVATE_KEY,
+];
+const quantosCampos = camposFirebase.filter(Boolean).length;
+
+if (quantosCampos > 0 && quantosCampos < 3) {
+  abortar(
+    'Credencial do Firebase incompleta: defina FIREBASE_PROJECT_ID,\n' +
+      'FIREBASE_CLIENT_EMAIL e FIREBASE_PRIVATE_KEY juntas, ou nenhuma delas.'
+  );
+}
+
+if (config.GOOGLE_APPLICATION_CREDENTIALS && quantosCampos === 3) {
+  // As variáveis FIREBASE_* têm prioridade, então o arquivo não será usado — e
+  // por isso também não é validado. Validá-lo impediria a subida por causa de
+  // um caminho antigo esquecido no painel, justamente durante a migração de
+  // uma forma de credencial para a outra.
+  console.warn(
+    'Aviso: GOOGLE_APPLICATION_CREDENTIALS ignorada — as variáveis FIREBASE_* estão\n' +
+      'definidas e têm prioridade. Remova a que não estiver em uso.'
+  );
+} else if (config.GOOGLE_APPLICATION_CREDENTIALS) {
+  // Verificado aqui, na subida. O SDK só lê o arquivo quando vai verificar o
+  // primeiro token — um arquivo ausente ou corrompido passaria despercebido até
+  // a primeira pessoa tentar entrar.
+  const caminho = config.GOOGLE_APPLICATION_CREDENTIALS;
+  const fs = require('fs');
+
+  if (!fs.existsSync(caminho)) {
+    abortar(`GOOGLE_APPLICATION_CREDENTIALS aponta para um arquivo que não existe:\n  ${caminho}`);
+  }
+
+  let chave;
+  try {
+    chave = JSON.parse(fs.readFileSync(caminho, 'utf8'));
+  } catch {
+    // A mensagem do JSON.parse não é repassada de propósito: no Node atual ela
+    // cita um trecho do texto inválido, que aqui seria um pedaço da chave privada.
+    abortar(
+      'GOOGLE_APPLICATION_CREDENTIALS aponta para um arquivo que não é um JSON válido:\n' +
+        `  ${caminho}\n` +
+        'Gere a chave de novo no console do Firebase, em Contas de serviço.'
+    );
+  }
+
+  const faltando = ['project_id', 'client_email', 'private_key'].filter(
+    (campo) => typeof chave?.[campo] !== 'string' || chave[campo] === ''
+  );
+  if (chave?.type !== 'service_account' || faltando.length > 0) {
+    abortar(
+      'GOOGLE_APPLICATION_CREDENTIALS não aponta para uma chave de conta de serviço completa:\n' +
+        `  ${caminho}\n` +
+        (faltando.length ? `Campos ausentes: ${faltando.join(', ')}.\n` : '') +
+        'Gere a chave de novo no console do Firebase, em Contas de serviço.'
+    );
+  }
+
+  config.projetoFirebase = chave.project_id;
+}
+
+config.credencialFirebase =
+  quantosCampos === 3 ? 'campos' : config.GOOGLE_APPLICATION_CREDENTIALS ? 'arquivo' : null;
+
+if (config.credencialFirebase === 'campos') {
+  config.projetoFirebase = config.FIREBASE_PROJECT_ID;
+}
+
+// Em produção, sem credencial nenhuma, toda requisição autenticada falharia.
+// Melhor não subir do que subir aparentemente saudável.
+if (config.NODE_ENV === 'production' && !config.credencialFirebase) {
+  abortar(
+    'Em produção a credencial do Firebase é obrigatória. Defina as três\n' +
+      'variáveis FIREBASE_* ou GOOGLE_APPLICATION_CREDENTIALS.'
+  );
 }
 
 config.origens =

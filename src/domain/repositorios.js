@@ -107,9 +107,50 @@ class RepositorioDeProfissionais {
   }
 }
 
+class RepositorioDePacientes {
+  /** @returns {Promise<import('./Paciente').Paciente|null>} */
+  async porFirebaseUid(_firebaseUid) {
+    naoImplementado('RepositorioDePacientes.porFirebaseUid');
+  }
+
+  /** @returns {Promise<import('./Paciente').Paciente|null>} */
+  async porId(_id) {
+    naoImplementado('RepositorioDePacientes.porId');
+  }
+
+  /**
+   * Cria o paciente e registra a operação em auditoria, na mesma transação.
+   *
+   * Lança `PacienteJaCadastrado` se o `firebaseUid` já existir. A verificação
+   * prévia do caso de uso não basta: duas requisições simultâneas passam por
+   * ela juntas, e só a restrição de unicidade do banco decide qual vence.
+   *
+   * @returns {Promise<import('./Paciente').Paciente>}
+   */
+  async criar(_dados) {
+    naoImplementado('RepositorioDePacientes.criar');
+  }
+
+  /**
+   * Atualiza apenas os campos informados e registra em auditoria os NOMES dos
+   * campos alterados — nunca os valores.
+   *
+   * Lança `NaoEncontrado` se o paciente não existir. O caso de uso confia nisso
+   * e não faz leitura prévia.
+   *
+   * @param {number} _id
+   * @param {{nome?: string, telefone?: string|null, dataNascimento?: string|null}} _campos
+   * @returns {Promise<import('./Paciente').Paciente>}
+   */
+  async atualizar(_id, _campos) {
+    naoImplementado('RepositorioDePacientes.atualizar');
+  }
+}
+
 module.exports = {
   RepositorioDeHorarios,
   RepositorioDeConsultas,
   RepositorioDeEspecialidades,
   RepositorioDeProfissionais,
+  RepositorioDePacientes,
 };
