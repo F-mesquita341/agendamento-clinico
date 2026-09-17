@@ -544,9 +544,12 @@ trava do adaptador. Motivo: a checagem prévia do caso de uso pegava o segundo
 pedido antes de ele chegar ao banco — o que depende de tempo, não de garantia.
 A trava verdadeira só é exercitada quando os dois pedidos leem o estado antes de
 qualquer um gravar. Escrevi então um teste que chama o adaptador diretamente,
-sem passar pelo caso de uso, e ele falha sem a trava. Terceira vez neste diário
-que um teste verde escondia um defeito, e a terceira vez em que só reintroduzir
-o defeito revelou isso.
+sem passar pelo caso de uso, e ele falha sem a trava. É a quarta ocorrência de
+teste verde sobre defeito neste trabalho — as três anteriores foram dois dublês
+que não espelhavam o adaptador real e o teste de vazamento da chave privada —, e
+a quarta em que só reintroduzir o defeito revelou isso. Com uma diferença: desta
+vez o culpado não foi um dublê, e sim a suposição de que duas requisições
+disparadas juntas de fato se cruzam no banco.
 
 **Cancelar relê sob bloqueio.** O plano previa `WHERE status <> 'cancelada'` no
 UPDATE; acabou melhor: `SELECT ... FOR UPDATE` e a verificação do próprio
