@@ -47,6 +47,7 @@ function carregarConfig(variaveis) {
     'DATABASE_URL',
     'DATABASE_URL_TESTE',
     'TRANSPORTE_BANCO',
+    'POOL_MAXIMO',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'FIREBASE_PROJECT_ID',
     'FIREBASE_CLIENT_EMAIL',
@@ -105,6 +106,29 @@ describe('guarda contra apagar o banco de desenvolvimento', () => {
     });
 
     expect(r.codigo).toBe(0);
+  });
+});
+
+describe('tamanho do pool', () => {
+  const base = { NODE_ENV: 'development', DATABASE_URL: DIRETO };
+
+  test('é opcional', () => {
+    expect(carregarConfig(base).codigo).toBe(0);
+  });
+
+  test('aceita um inteiro dentro do limite', () => {
+    expect(carregarConfig({ ...base, POOL_MAXIMO: '10' }).codigo).toBe(0);
+  });
+
+  test.each([
+    ['texto', 'abc', /POOL_MAXIMO: precisa ser um número/],
+    ['zero', '0', /POOL_MAXIMO: precisa ser maior que zero/],
+    ['acima do limite do Neon', '500', /POOL_MAXIMO: no máximo 50/],
+  ])('recusa %s na subida', (_rotulo, valor, mensagem) => {
+    const r = carregarConfig({ ...base, POOL_MAXIMO: valor });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(mensagem);
   });
 });
 
