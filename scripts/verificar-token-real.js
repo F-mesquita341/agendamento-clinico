@@ -162,8 +162,10 @@ async function verificarAgendamento() {
   );
 
   const consultaId = daA.corpo?.consulta?.id;
+  // 404, e não 403: consulta alheia responde como se não existisse, para que
+  // ninguém possa contar os registros da clínica percorrendo ids.
   const espiada = await api('GET', `/consultas/${consultaId}`, { token: USUARIOS.B.token });
-  conferir('B não lê a consulta de A → 403', espiada.status === 403, `HTTP ${espiada.status}`);
+  conferir('B não enxerga a consulta de A → 404', espiada.status === 404, `HTTP ${espiada.status}`);
 
   const listaDeB = await api('GET', '/consultas', { token: USUARIOS.B.token });
   conferir(
