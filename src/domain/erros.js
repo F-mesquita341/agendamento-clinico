@@ -60,6 +60,23 @@ class RegraDeNegocio extends ErroDeDominio {
 }
 
 /**
+ * O paciente já tem consulta ativa que colide com o horário pedido.
+ *
+ * Classe própria, e não um `RegraDeNegocio` montado na hora, porque a mesma
+ * recusa nasce em dois lugares: na verificação prévia do caso de uso e na
+ * restrição de exclusão do banco, traduzida pelo adaptador. A mensagem que o
+ * paciente lê precisa ser a mesma nos dois caminhos.
+ */
+class ConsultaSobreposta extends RegraDeNegocio {
+  constructor() {
+    super(
+      'CONSULTA_SOBREPOSTA',
+      'Você já tem uma consulta marcada nesse mesmo horário.'
+    );
+  }
+}
+
+/**
  * Token expirado é diferente de token inválido: a pessoa não fez nada de
  * errado, só o tempo passou. A ação diz ao app para renovar o token e repetir
  * a requisição em silêncio, em vez de mandar a pessoa de volta ao login.
@@ -110,6 +127,7 @@ module.exports = {
   NaoAutenticado,
   AcessoNegado,
   RegraDeNegocio,
+  ConsultaSobreposta,
   SessaoExpirada,
   PerfilNaoCadastrado,
   PacienteJaCadastrado,

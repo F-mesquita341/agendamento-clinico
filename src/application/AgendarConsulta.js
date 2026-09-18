@@ -20,7 +20,12 @@
  * as checagens do passo 1 servem para explicar melhor os casos previsíveis.
  */
 
-const { NaoEncontrado, HorarioIndisponivel, RegraDeNegocio } = require('../domain/erros');
+const {
+  NaoEncontrado,
+  HorarioIndisponivel,
+  RegraDeNegocio,
+  ConsultaSobreposta,
+} = require('../domain/erros');
 const { relogioDoSistema } = require('../domain/Relogio');
 
 class AgendarConsulta {
@@ -62,19 +67,20 @@ class AgendarConsulta {
     // Lança HORARIO_NO_PASSADO ou HORARIO_INDISPONIVEL.
     horario.garantirQuePodeSerReservado(agora);
 
-    // O paciente não pode estar em dois lugares ao mesmo tempo. Sem esta
-    // checagem o banco aceitaria, porque o índice único protege o horário,
-    // não a agenda do paciente.
+    // O paciente não pode estar em dois lugares ao mesmo tempo.
+    //
+    // Esta leitura acontece fora da transação e, sozinha, não garante nada: dois
+    // pedidos simultâneos para horários diferentes e sobrepostos passam por aqui
+    // juntos. Quem garante é a restrição de exclusão `consulta_sem_sobreposicao`
+    // (migration 007), que o adaptador traduz no mesmo erro — a checagem daqui
+    // existe para recusar cedo o caso comum, sem tocar no banco para escrever.
     const conflito = await this.consultas.existeAtivaNoIntervalo(
       pacienteId,
       horario.inicio,
       horario.fim
     );
     if (conflito) {
-      throw new RegraDeNegocio(
-        'CONSULTA_SOBREPOSTA',
-        'Você já tem uma consulta marcada nesse mesmo horário.'
-      );
+      throw new ConsultaSobreposta();
     }
 
     const expiraEm = new Date(agora.getTime() + this.reservaMinutos * 60_000);

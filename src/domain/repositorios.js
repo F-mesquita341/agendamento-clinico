@@ -41,13 +41,21 @@ class RepositorioDeHorarios {
    * informasse, precisaria ter lido o profissional antes, fora da transação,
    * e um reajuste no intervalo produziria cobrança divergente da combinada.
    *
+   * Três desfechos:
+   *   - a consulta criada;
+   *   - `null` quando a reserva não aconteceu porque outra pessoa chegou antes
+   *     — versão desatualizada, ou a rede de segurança do banco recusando uma
+   *     segunda consulta ativa no mesmo horário;
+   *   - exceção de domínio quando o pedido é inadmissível por outra razão:
+   *     profissional desativado, ou consulta sobreposta na agenda do paciente,
+   *     recusada pela restrição `consulta_sem_sobreposicao` (migration 007).
+   *
    * @param {object} dados
    * @param {number|string} dados.horarioId
    * @param {number} dados.versao versão lida pelo cliente
    * @param {number|string} dados.pacienteId
    * @param {Date} dados.reservaExpiraEm
-   * @returns {Promise<import('./Consulta').Consulta|null>} a consulta criada,
-   *          ou `null` se a versão não conferia (outra pessoa chegou antes).
+   * @returns {Promise<import('./Consulta').Consulta|null>}
    */
   async reservarEAgendar(_dados) {
     naoImplementado('RepositorioDeHorarios.reservarEAgendar');
@@ -88,9 +96,13 @@ class RepositorioDeConsultas {
   }
 
   /**
-   * Página do histórico do paciente, da consulta mais próxima para a mais
-   * antiga. Inclui as canceladas: elas são matéria-prima da análise de
-   * absenteísmo, que é o problema central do trabalho.
+   * Página do histórico do paciente, da consulta mais distante no futuro para a
+   * mais antiga (`inicio` decrescente, id como desempate). Inclui as canceladas:
+   * elas são matéria-prima da análise de absenteísmo, que é o problema central
+   * do trabalho.
+   *
+   * Uma tela de "próxima consulta" NÃO deve usar o primeiro item desta lista —
+   * ele é o compromisso mais longínquo, não o mais próximo.
    *
    * @param {{pacienteId: number, limite: number, deslocamento: number}} _filtros
    * @returns {Promise<{itens: Array, total: number}>} itens são leituras.
@@ -111,6 +123,9 @@ class RepositorioDeConsultas {
    * do caso de uso e esta escrita cabe outro cancelamento da mesma consulta.
    * Lança `NaoEncontrado` se a consulta não existir e o erro de estado do
    * domínio se ela não admitir mais cancelamento.
+   *
+   * @returns {Promise<import('./Consulta').Consulta>} a consulta já cancelada —
+   *          é ela que a resposta HTTP devolve, com valor e horário.
    */
   async cancelar(_consultaId) {
     naoImplementado('RepositorioDeConsultas.cancelar');

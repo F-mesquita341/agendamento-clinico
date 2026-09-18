@@ -10,7 +10,7 @@
 
 const { RepositorioDeHorarios } = require('../../domain/repositorios');
 const { Horario } = require('../../domain/Horario');
-const { RegraDeNegocio } = require('../../domain/erros');
+const { RegraDeNegocio, ConsultaSobreposta } = require('../../domain/erros');
 const { pool, consultar, transacao } = require('./pool');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 
@@ -68,7 +68,7 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
         `UPDATE horario
             SET status = 'reservado', versao = versao + 1
           WHERE id = $1 AND versao = $2 AND status = 'disponivel'
-          RETURNING profissional_id, versao`,
+          RETURNING profissional_id, versao, inicio, fim`,
         [horarioId, versao]
       );
 
@@ -76,7 +76,12 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
         return null;
       }
 
-      const { profissional_id: profissionalId, versao: versaoNova } = reserva.rows[0];
+      const {
+        profissional_id: profissionalId,
+        versao: versaoNova,
+        inicio,
+        fim,
+      } = reserva.rows[0];
 
       // O preço é lido AQUI, dentro da transação, e congelado na consulta: ele
       // é atributo do profissional, e um reajuste amanhã não pode alterar o
@@ -100,18 +105,28 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
       try {
         const { rows } = await cliente.query(
           `INSERT INTO consulta
-             (paciente_id, horario_id, status, valor_centavos, reserva_expira_em)
-           VALUES ($1, $2, 'pendente_pagamento', $3, $4)
+             (paciente_id, horario_id, status, valor_centavos, reserva_expira_em, periodo)
+           VALUES ($1, $2, 'pendente_pagamento', $3, $4, tstzrange($5, $6, '[)'))
            RETURNING ${COLUNAS_DA_CONSULTA}`,
           [
             pacienteId,
             horarioId,
             profissionais[0].valor_consulta_centavos,
             reservaExpiraEm,
+            // O período é copiado do horário reservado logo acima, e congela a
+            // duração combinada junto com o preço.
+            inicio,
+            fim,
           ]
         );
         linha = rows[0];
       } catch (erro) {
+        // A agenda do paciente já tem consulta ativa colidindo com este
+        // intervalo. A checagem prévia do caso de uso não pega quando os dois
+        // pedidos chegam juntos — ver migration 007.
+        if (erro.code === '23P01' && erro.constraint === 'consulta_sem_sobreposicao') {
+          throw new ConsultaSobreposta();
+        }
         // A rede de segurança do banco disparou: já existe consulta ativa neste
         // horário, embora ele estivesse marcado como disponível. Para o paciente
         // é a mesma coisa que perder a disputa (409), mas para nós é sinal de
