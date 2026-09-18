@@ -61,6 +61,7 @@ async function obterTokenReal(email, senha) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password: senha, returnSecureToken: true }),
+      signal: AbortSignal.timeout(PRAZO_MS),
     }
   );
   const corpo = await resposta.json();
@@ -72,6 +73,14 @@ async function obterTokenReal(email, senha) {
   return corpo.idToken;
 }
 
+/**
+ * Prazo de cada chamada. Sem ele, uma API que aceita a conexão e nunca responde
+ * deixava o script parado em silêncio, sem dizer o que esperava. Foi o que
+ * aconteceu na primeira execução da Etapa 6: o terminal da API estava em modo
+ * de seleção, que no Windows congela o processo na próxima escrita na tela.
+ */
+const PRAZO_MS = 15_000;
+
 async function api(metodo, caminho, { token, corpo } = {}) {
   let resposta;
   try {
@@ -82,8 +91,17 @@ async function api(metodo, caminho, { token, corpo } = {}) {
         ...(corpo ? { 'Content-Type': 'application/json' } : {}),
       },
       body: corpo ? JSON.stringify(corpo) : undefined,
+      signal: AbortSignal.timeout(PRAZO_MS),
     });
   } catch (erro) {
+    if (erro.name === 'TimeoutError') {
+      throw new Error(
+        `a API aceitou a conexão mas não respondeu a ${metodo} ${caminho} em ` +
+          `${PRAZO_MS / 1000} s. Olhe a janela onde ela está rodando: se o título ` +
+          'começar com "Selecionar", aperte Esc nela — no Windows, esse modo congela ' +
+          'o processo.'
+      );
+    }
     // "fetch failed" sozinho não diz nada. A causa real — conexão recusada,
     // conexão derrubada no meio — fica em `erro.cause`.
     const causa = erro.cause ? `${erro.cause.code ?? ''} ${erro.cause.message ?? ''}`.trim() : erro.message;
@@ -198,9 +216,16 @@ async function principal() {
   }
 
   console.log(`\nAPI: ${API}`);
-  const saude = await api('GET', '/saude').catch(() => null);
-  if (!saude || saude.status !== 200) {
-    abortar('A API não respondeu em /saude. Suba-a em outro terminal com: npm run dev');
+  let saude;
+  try {
+    saude = await api('GET', '/saude');
+  } catch (erro) {
+    // Conexão recusada quer dizer API desligada; prazo estourado quer dizer API
+    // ligada mas travada. A mensagem de `api()` já distingue os dois casos.
+    abortar(`${erro.message}\nSe a API não estiver rodando, suba-a em outro terminal com: npm run dev`);
+  }
+  if (saude.status !== 200) {
+    abortar(`A API respondeu /saude com HTTP ${saude.status}: o banco pode estar indisponível.`);
   }
 
   console.log('\n1. Tokens reais do Firebase');

@@ -657,3 +657,31 @@ Cada correção foi confirmada reintroduzindo o defeito.
 **235 testes passando.**
 
 ---
+
+## 18/09/2026 — Portão da Etapa 6 com token real
+
+Script executado pelo Felipe, com a API em outro terminal e tokens reais do
+Firebase: **22 verificações, todas aprovadas.** O bloco novo prova, fora da
+suíte automática, o que a Etapa 6 promete: A agenda (201) e a consulta nasce
+com o preço do profissional; B, com a mesma versão em mãos, recebe 409 com a
+ação de recarregar a grade; B não enxerga a consulta de A (404, igual a uma
+consulta inexistente); A cancela, e o horário volta à grade com a versão
+adiantada em dois.
+
+**A primeira execução ficou parada, sem mensagem nenhuma.** O diagnóstico: a
+porta 3000 pertencia ao `npm run dev` do próprio dia, vivo, que aceitava a
+conexão mas não respondia — nem o 503 que o `/saude` devolve sozinho em três
+segundos. Ou seja, travado, não lento. O título da janela era "Selecionar npm
+run dev": no console clássico do Windows, um clique dentro da janela ativa o
+modo de seleção, e o processo congela na próxima vez que escreve na tela. Um
+Esc resolveu, e o script seguiu sozinho de onde tinha parado.
+
+Fica registrado por dois motivos. Vai acontecer de novo em demonstração —
+inclusive diante da banca —, então o README ganhou a instrução. E o script
+tinha parte da culpa: esperava para sempre, em silêncio. Ganhou prazo de 15
+segundos por chamada e uma mensagem que distingue API desligada (conexão
+recusada) de API travada (prazo estourado), já com a instrução do Esc. Os dois
+caminhos foram testados contra um servidor que aceita e nunca responde e
+contra uma porta vazia.
+
+---

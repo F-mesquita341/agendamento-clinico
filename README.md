@@ -103,6 +103,16 @@ sobre WebSocket, na porta 443. O banco continua sendo PostgreSQL, o SQL é o
 mesmo e as transações — das quais o lock otimista depende — funcionam
 normalmente. Muda só o transporte.
 
+### Se a API parar de responder no Windows
+
+No console clássico do Windows, um clique dentro da janela ativa o **modo de
+seleção** — o título passa a começar com "Selecionar" — e o processo congela na
+próxima vez que tenta escrever na tela. A API continua aceitando conexões, mas
+não responde nenhuma. Aperte **Esc** na janela da API e ela volta na hora.
+
+Para desligar de vez: botão direito na barra de título → Propriedades → Opções
+→ desmarcar **Modo de Edição Rápida**.
+
 ## Scripts
 
 | Comando | O que faz |
