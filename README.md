@@ -103,6 +103,16 @@ sobre WebSocket, na porta 443. O banco continua sendo PostgreSQL, o SQL é o
 mesmo e as transações — das quais o lock otimista depende — funcionam
 normalmente. Muda só o transporte.
 
+### Se a API parar de responder no Windows
+
+No console clássico do Windows, um clique dentro da janela ativa o **modo de
+seleção** — o título passa a começar com "Selecionar" — e o processo congela na
+próxima vez que tenta escrever na tela. A API continua aceitando conexões, mas
+não responde nenhuma. Aperte **Esc** na janela da API e ela volta na hora.
+
+Para desligar de vez: botão direito na barra de título → Propriedades → Opções
+→ desmarcar **Modo de Edição Rápida**.
+
 ## Scripts
 
 | Comando | O que faz |
@@ -139,8 +149,7 @@ interpretar o texto da mensagem.
 | 200 / 201 / 204 | Sucesso, criado, sem conteúdo |
 | 400 | Requisição malformada |
 | 401 | Token ausente, expirado ou inválido |
-| 403 | O recurso pertence a outro paciente |
-| 404 | Não existe |
+| 404 | Não existe — ou pertence a outro paciente, sem distinção |
 | 409 | Conflito de concorrência ou de estado |
 | 422 | Regra de negócio violada |
 | 500 | Erro interno |
@@ -160,11 +169,56 @@ UPDATE horario
 Se nenhuma linha for afetada, outra pessoa chegou primeiro: a transação é
 desfeita e a API responde **409** com a instrução de recarregar a grade.
 
-Há ainda uma segunda defesa, no próprio banco: o índice único parcial
-`consulta_horario_ativo` impede duas consultas ativas no mesmo horário mesmo que
-algum caminho futuro esqueça de comparar a versão. Ele é *parcial* — ignora
-consultas canceladas — porque um horário cancelado precisa voltar a ser
-agendável, enquanto o registro do cancelamento permanece para o histórico.
+Há ainda duas defesas no próprio banco, porque toda regra que compara estado
+antes de gravar tem uma janela em que dois pedidos passam juntos:
+
+- o índice único parcial `consulta_horario_ativo` impede duas consultas ativas
+  no mesmo **horário**, mesmo que algum caminho futuro esqueça de comparar a
+  versão;
+- a restrição de exclusão `consulta_sem_sobreposicao` impede duas consultas
+  ativas sobrepostas na agenda do mesmo **paciente**. O lock otimista não cobre
+  esse caso: dois pedidos simultâneos para horários diferentes reservam linhas
+  diferentes, sem nada em comum para disputar.
+
+As duas são *parciais* — ignoram consultas canceladas — porque um horário
+cancelado precisa voltar a ser agendável, enquanto o registro do cancelamento
+permanece para o histórico.
+
+## Agendamento
+
+| Rota | O que faz |
+|---|---|
+| `POST /consultas` | Agenda, com `{ horarioId, versao }` lidos da grade |
+| `GET /consultas` | Lista as consultas do paciente do token, paginadas |
+| `GET /consultas/:id` | Detalhe de uma consulta própria |
+| `PATCH /consultas/:id/cancelamento` | Cancela e devolve o horário à grade |
+
+O fluxo do aplicativo é: ler a grade em `GET /profissionais/:id/horarios`,
+guardar a `versao` de cada horário e reenviá-la ao agendar. A consulta nasce em
+`pendente_pagamento`, com o valor do profissional congelado no ato e uma reserva
+válida por `RESERVA_MINUTOS` (15 por padrão).
+
+Cancelar **não apaga** a consulta: ela muda para `cancelada` e continua no
+histórico, que é a matéria-prima da análise de absenteísmo. O horário volta para
+`disponivel` com a versão incrementada de novo — quem ainda tiver a versão
+anterior em mãos precisa recarregar a grade.
+
+| Código | Ação indicada | Quando |
+|---|---|---|
+| `HORARIO_INDISPONIVEL` (409) | `recarregar_horarios` | Outra pessoa reservou o horário primeiro |
+| `CONSULTA_SOBREPOSTA` (422) | — | O paciente já tem consulta ativa no mesmo intervalo |
+| `HORARIO_NO_PASSADO` (422) | — | O horário já começou |
+| `PROFISSIONAL_INDISPONIVEL` (422) | — | O profissional foi desativado |
+| `CONSULTA_JA_CANCELADA` (422) | — | Cancelamento repetido |
+| `NAO_ENCONTRADO` (404) | — | A consulta não existe **ou pertence a outro paciente** |
+
+Consulta de outro paciente responde exatamente como consulta inexistente. Um
+403 não informaria nada ao dono legítimo, que nunca o recebe, e permitiria a
+qualquer paciente autenticado contar os registros da clínica percorrendo ids.
+
+Na grade, `?de=` e `?ate=` aceitam instante ISO 8601 ou data sem hora
+(`AAAA-MM-DD`), lida como meia-noite **no fuso da clínica**, `America/Fortaleza`.
+Janela com fim anterior ao início responde `JANELA_INVALIDA` (422).
 
 ## Autenticação
 
@@ -219,8 +273,9 @@ produção, a API não sobe sem uma das duas formas.
 ### Testes e token real
 
 A suíte usa um verificador de token falso, com o mesmo contrato do real, e roda
-sem rede e sem credencial. A autenticação com o Firebase de verdade é provada
-por um script, com a API rodando em outro terminal:
+sem rede e sem credencial. A autenticação com o Firebase de verdade — e, com
+ela, o agendamento disputado entre dois pacientes — é provada por um script, com
+a API rodando em outro terminal:
 
 ```powershell
 $env:FIREBASE_WEB_API_KEY = "..."

@@ -505,3 +505,183 @@ defeito correspondente: três falhas.
 **187 testes passando.**
 
 ---
+
+## 17/09/2026 — Etapa 6: agendamento com lock otimista
+
+O domínio e os casos de uso estavam prontos desde a Etapa 3, mas rodavam só
+contra dublês em memória: `RepositorioDeHorariosPg` era leitura pura e
+`RepositorioDeConsultasPg` não existia. Esta etapa ligou as peças ao PostgreSQL
+e as expôs por HTTP. Nenhuma migration — tabelas, coluna `versao` e índice
+parcial vieram da Etapa 2.
+
+**O lock otimista cabe em um UPDATE.** `WHERE id = $1 AND versao = $2 AND status
+= 'disponivel'`. Sob concorrência, a segunda transação fica bloqueada na linha
+até a primeira confirmar; quando o bloqueio sai, o PostgreSQL reavalia o WHERE
+sobre a linha já atualizada, a versão não confere mais e o UPDATE não alcança
+nenhuma linha. Não existe "ler, decidir, escrever": a decisão é a própria
+escrita. O adaptador devolve `null`, e o caso de uso traduz em 409.
+
+**O preço é lido do profissional dentro da transação** e congelado na consulta.
+Um reajuste amanhã não altera consulta marcada hoje. É o mesmo ponto em que o
+`horario.valorCentavos` fantasma tinha se escondido na Etapa 3.
+
+**Profissional desativado passou a ser recusado.** Desativar tira os horários
+das listagens, mas um aplicativo com a tela antiga aberta ainda conseguiria
+agendar. A verificação acontece depois do UPDATE, e o ROLLBACK desfaz a reserva
+— o teste confere que o horário continua disponível na versão original.
+
+**O teste de concorrência revelou algo para a Etapa 7.** Vinte requisições
+simultâneas do mesmo paciente produzem um 201 e dezenove recusas, mas as
+recusas vêm em dois sabores: 409 quando perderam a disputa pela versão, e 422
+`CONSULTA_SOBREPOSTA` quando a checagem prévia rodou depois de a vencedora ter
+gravado — nesse instante o horário já conflita com a agenda do próprio paciente.
+Ambas são recusas legítimas, mas o teste de carga da Etapa 7 precisa usar
+pacientes distintos, ou o resultado publicado misturaria dois fenômenos.
+
+**Um teste verde que não provava nada.** O caso mais instrutivo do dia: o teste
+de dois cancelamentos simultâneos via HTTP passou mesmo depois de eu remover a
+trava do adaptador. Motivo: a checagem prévia do caso de uso pegava o segundo
+pedido antes de ele chegar ao banco — o que depende de tempo, não de garantia.
+A trava verdadeira só é exercitada quando os dois pedidos leem o estado antes de
+qualquer um gravar. Escrevi então um teste que chama o adaptador diretamente,
+sem passar pelo caso de uso, e ele falha sem a trava. É a quarta ocorrência de
+teste verde sobre defeito neste trabalho — as três anteriores foram dois dublês
+que não espelhavam o adaptador real e o teste de vazamento da chave privada —, e
+a quarta em que só reintroduzir o defeito revelou isso. Com uma diferença: desta
+vez o culpado não foi um dublê, e sim a suposição de que duas requisições
+disparadas juntas de fato se cruzam no banco.
+
+**Cancelar relê sob bloqueio.** O plano previa `WHERE status <> 'cancelada'` no
+UPDATE; acabou melhor: `SELECT ... FOR UPDATE` e a verificação do próprio
+domínio, `Consulta.garantirQuePodeSerCancelada()`, extraída do método que já
+existia. Assim a mensagem certa para cada estado continua morando num lugar só,
+e o adaptador não duplica regra de negócio.
+
+**Por que isso importa:** sem essa trava, um cancelamento reenviado — dedo duplo
+no botão, aplicativo repetindo depois de uma queda de rede — liberaria um
+horário que outra pessoa já teria reservado no intervalo. O teste que prova isso
+é o de "cancelamento repetido não rouba o horário de quem reservou depois".
+
+**`liberar` nasceu com chamador.** Em vez de esperar a rotina de expiração da
+Etapa 8, recebe um `executor` opcional e é usado pelo cancelamento dentro da
+transação. Só age sobre horário `reservado`: o que a clínica bloqueou continua
+bloqueado.
+
+**Leitura composta.** As telas mostram data, profissional e especialidade junto
+com a consulta, então `doPaciente` devolve `{ consulta, horario, profissional }`
+por JOIN, e não uma requisição por item. As traduções de linha para entidade são
+reaproveitadas dos outros adaptadores — o horário que aparece na consulta é
+montado pelo mesmo código que monta a grade.
+
+Cinco defeitos reintroduzidos de propósito, cinco falhas no teste esperado:
+comparação de versão, trava do cancelamento, preço do profissional, profissional
+inativo e o middleware que resolve o paciente do token.
+
+**219 testes passando.**
+
+---
+
+## 18/09/2026 — Revisão local do código inteiro
+
+A revisão em nuvem ficou indisponível — a cota gratuita acabou —, então a
+revisão foi feita localmente, sobre todo o `src/`, com cinco ângulos de busca
+independentes: varredura linha a linha, rastreamento de contratos entre
+arquivos, armadilhas de linguagem e de SQL, adaptadores e concorrência, e
+limpeza. Quinze achados sobreviveram à verificação. Nove foram corrigidos agora;
+seis ficaram para as etapas em que fazem sentido.
+
+**O mais grave repetia o padrão de dois dias atrás.** A regra "o paciente não
+fica em dois lugares ao mesmo tempo" era verificada por uma leitura fora da
+transação, e nada no banco a garantia. Dois pedidos simultâneos para horários
+DIFERENTES e sobrepostos passavam juntos: cada um reservava a sua própria linha
+de horário, versões distintas, nada em comum para disputar — o lock otimista
+não tinha o que proteger. O teste existente rodava em sequência e passava. Três
+dos cinco ângulos encontraram isso de forma independente.
+
+O teste novo, com os dois pedidos em paralelo, foi escrito ANTES da correção e
+falhou com dois 201 — o defeito observado, não apenas raciocinado. A correção é
+a migration 007: uma restrição de exclusão `EXCLUDE USING gist (paciente_id
+WITH =, periodo WITH &&)`, parcial como o índice de horário. Exigiu copiar o
+período do horário para a consulta, porque uma restrição só enxerga a própria
+tabela — o que tem um efeito colateral bom: a duração combinada fica congelada
+junto com o preço.
+
+É a quinta ocorrência de teste verde sobre defeito neste trabalho, e a segunda
+do mesmo tipo em dois dias. Deixou de ser acaso e virou regra de projeto: **toda
+regra que compara estado antes de gravar precisa de rede de segurança no
+banco.** No horário, o índice parcial; no cancelamento, o `FOR UPDATE`; na
+agenda do paciente, a restrição de exclusão.
+
+**500 em rota pública.** `Number.isInteger(1e21)` é verdadeiro, então
+`?pagina=1e21` atravessava a validação; o driver serializava o número como
+"1e+21" e o PostgreSQL recusava. Qualquer pessoa, sem token, gerava erro
+interno no log à vontade. Confirmado com requisição real antes de corrigir.
+
+**Coerção no corpo JSON.** O esquema de inteiro usado nas rotas converte texto
+em número, o que faz sentido em query string. No corpo do agendamento, convertia
+`true` em 1 — e `{"horarioId": true}` agendava o horário 1, que o paciente nunca
+viu. O corpo passou a usar um esquema sem coerção.
+
+**A grade lia datas em UTC.** `?de=2026-10-01` virava 30 de setembro às 21h em
+Quixadá. O mesmo erro já tinha aparecido na data de nascimento, na Etapa 5, e a
+correção de lá não tinha sido estendida à grade.
+
+**Consulta de outro paciente passou a responder 404.** A decisão anterior, 403,
+tinha um custo que não fora pesado: o dono legítimo nunca recebe 403, então a
+distinção não informava nada a quem tinha direito, e permitia a qualquer
+paciente autenticado contar os registros da clínica percorrendo ids. O domínio
+continua lançando `AcessoNegado`; a política de não revelar existência é da
+fronteira HTTP.
+
+**Dublês que não cumpriam o contrato.** Nenhum dos três estendia a classe
+abstrata do domínio, e um deles não tinha `leituraPorId`. Agora estendem, e um
+teste de arquitetura compara os métodos do contrato com os de cada dublê — ele
+aponta pelo nome o método que falta.
+
+**Mais um teste verde, pego a tempo.** O primeiro teste da ordenação estável
+passou mesmo sem a correção: numa tabela pequena o PostgreSQL devolve as linhas
+na ordem física, que coincidia com a do id. Foi reescrito gravando as duas
+linhas em ordem física inversa, e aí falhou com o defeito. É o mesmo cuidado de
+ontem, aplicado a mim mesmo no mesmo dia: sem reintroduzir o defeito, esse teste
+teria entrado no repositório provando nada.
+
+**Adiados, com motivo:** revogação de token e tempos limite de transação e do
+healthcheck ficam para a Etapa 10, que é a de endurecimento; o desligamento
+gracioso, para a Etapa 8, quando houver um Render de verdade para observar; a
+consulta única com CTE no caminho do agendamento, para o início da Etapa 7, onde
+dá para medir o ganho antes e depois; e as quatro duplicações de código, para a
+Etapa 10, já que o escopo escolhido foi só correção.
+
+Cada correção foi confirmada reintroduzindo o defeito.
+
+**235 testes passando.**
+
+---
+
+## 18/09/2026 — Portão da Etapa 6 com token real
+
+Script executado pelo Felipe, com a API em outro terminal e tokens reais do
+Firebase: **22 verificações, todas aprovadas.** O bloco novo prova, fora da
+suíte automática, o que a Etapa 6 promete: A agenda (201) e a consulta nasce
+com o preço do profissional; B, com a mesma versão em mãos, recebe 409 com a
+ação de recarregar a grade; B não enxerga a consulta de A (404, igual a uma
+consulta inexistente); A cancela, e o horário volta à grade com a versão
+adiantada em dois.
+
+**A primeira execução ficou parada, sem mensagem nenhuma.** O diagnóstico: a
+porta 3000 pertencia ao `npm run dev` do próprio dia, vivo, que aceitava a
+conexão mas não respondia — nem o 503 que o `/saude` devolve sozinho em três
+segundos. Ou seja, travado, não lento. O título da janela era "Selecionar npm
+run dev": no console clássico do Windows, um clique dentro da janela ativa o
+modo de seleção, e o processo congela na próxima vez que escreve na tela. Um
+Esc resolveu, e o script seguiu sozinho de onde tinha parado.
+
+Fica registrado por dois motivos. Vai acontecer de novo em demonstração —
+inclusive diante da banca —, então o README ganhou a instrução. E o script
+tinha parte da culpa: esperava para sempre, em silêncio. Ganhou prazo de 15
+segundos por chamada e uma mensagem que distingue API desligada (conexão
+recusada) de API travada (prazo estourado), já com a instrução do Esc. Os dois
+caminhos foram testados contra um servidor que aceita e nunca responde e
+contra uma porta vazia.
+
+---

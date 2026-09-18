@@ -97,3 +97,37 @@ describe('regra de dependência', () => {
     }
   });
 });
+
+/**
+ * Os dublês de teste cumprem o contrato inteiro — também verificado por máquina.
+ *
+ * Herdar da classe abstrata faz um método esquecido estourar com o nome dele
+ * QUANDO chamado; este teste acusa a falta antes, mesmo que nenhum teste
+ * chame o método. Foi assim que `ConsultasFalsas.leituraPorId` faltou sem que
+ * ninguém percebesse: nenhum teste de unidade o chamava.
+ */
+describe('dublês de teste', () => {
+  const contratos = require('../../src/domain/repositorios');
+  const dubles = require('../helpers/repositoriosFalsos');
+
+  const pares = [
+    [contratos.RepositorioDeHorarios, dubles.HorariosFalsos],
+    [contratos.RepositorioDeConsultas, dubles.ConsultasFalsas],
+    [contratos.RepositorioDePacientes, dubles.PacientesFalsos],
+  ];
+
+  test.each(pares.map(([contrato, duble]) => [duble.name, contrato.name, contrato, duble]))(
+    '%s implementa todos os métodos de %s',
+    (_duble, _contrato, Contrato, Duble) => {
+      const metodos = Object.getOwnPropertyNames(Contrato.prototype).filter(
+        (nome) => nome !== 'constructor'
+      );
+      const faltando = metodos.filter(
+        (nome) => !Object.prototype.hasOwnProperty.call(Duble.prototype, nome)
+      );
+
+      expect(Duble.prototype).toBeInstanceOf(Contrato);
+      expect(faltando).toEqual([]);
+    }
+  );
+});

@@ -72,8 +72,12 @@ describe('AgendarConsulta', () => {
       caso.executar({ pacienteId: 8, horarioId: 1, versao: 0 })
     ).rejects.toMatchObject({ status: 409 });
 
-    const consultasDoSegundo = await horarios.consultas.doPaciente(8);
-    expect(consultasDoSegundo).toHaveLength(0);
+    const doSegundo = await horarios.consultas.doPaciente({
+      pacienteId: 8,
+      limite: 10,
+      deslocamento: 0,
+    });
+    expect(doSegundo.itens).toHaveLength(0);
   });
 
   test('não agenda horário que já começou', async () => {

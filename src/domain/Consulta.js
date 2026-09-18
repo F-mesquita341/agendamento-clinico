@@ -86,6 +86,19 @@ class Consulta {
     if (!this.pertenceAo(pacienteId)) {
       throw new AcessoNegado('Esta consulta pertence a outro paciente.');
     }
+    this.garantirQuePodeSerCancelada();
+  }
+
+  /**
+   * Só o estado, sem a questão do dono.
+   *
+   * O adaptador de persistência repete esta verificação sob bloqueio de linha,
+   * porque entre a checagem do caso de uso e a escrita cabe outro cancelamento
+   * da mesma consulta — dedo duplo no botão, aplicativo reenviando depois de
+   * uma queda de rede. Separar evita que a mensagem certa para cada estado
+   * exista em dois lugares.
+   */
+  garantirQuePodeSerCancelada() {
     if (this.status === STATUS.CANCELADA) {
       throw new RegraDeNegocio(
         'CONSULTA_JA_CANCELADA',

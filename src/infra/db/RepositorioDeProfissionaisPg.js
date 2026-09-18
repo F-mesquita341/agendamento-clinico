@@ -75,7 +75,10 @@ class RepositorioDeProfissionaisPg extends RepositorioDeProfissionais {
       `SELECT ${COLUNAS}, count(*) OVER () AS total
        ${ORIGEM}
        ${FILTRO}
-       ORDER BY p.nome
+       -- p.id desempata: dois profissionais homônimos têm ordem arbitrária sob
+       -- ORDER BY p.nome sozinho, e a mesma linha pode aparecer em duas páginas
+       -- enquanto outra nunca aparece.
+       ORDER BY p.nome, p.id
        LIMIT $3 OFFSET $4`,
       [especialidadeId, padrao, limite, deslocamento]
     );
@@ -109,4 +112,11 @@ class RepositorioDeProfissionaisPg extends RepositorioDeProfissionais {
   }
 }
 
-module.exports = { RepositorioDeProfissionaisPg, escaparCuringas };
+// `paraEntidade` sai daqui como `paraProfissional` porque o adaptador de
+// consultas monta profissional a partir do mesmo JOIN: a tradução precisa ser
+// literalmente a mesma nos dois lugares.
+module.exports = {
+  RepositorioDeProfissionaisPg,
+  escaparCuringas,
+  paraProfissional: paraEntidade,
+};

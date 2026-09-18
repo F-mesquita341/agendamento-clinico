@@ -8,6 +8,12 @@
  * se a versão apresentada não for a atual, a reserva não acontece e devolve
  * null. É isso que permite testar o caminho do 409 sem subir PostgreSQL.
  *
+ * Os três dublês ESTENDEM os contratos de `domain/repositorios`. Não é
+ * formalidade: sem isso, um método que o contrato declara e o dublê esquece
+ * some em silêncio — quem chamar recebe "is not a function", e o teste que
+ * deveria acusar a falta vira um 500 sem explicação. Herdando, a própria classe
+ * abstrata responde dizendo qual método falta.
+ *
  * Regra ao mexer neste arquivo: o dublê só pode conhecer o que o adaptador
  * real conhece. Inventar aqui um campo que a entidade do domínio não tem faz
  * a suíte passar sobre código quebrado — foi exatamente o que aconteceu com o
@@ -20,17 +26,23 @@ const { Horario, STATUS_HORARIO } = require('../../src/domain/Horario');
 const { Dinheiro } = require('../../src/domain/Dinheiro');
 const { Paciente } = require('../../src/domain/Paciente');
 const { NaoEncontrado, PacienteJaCadastrado } = require('../../src/domain/erros');
+const {
+  RepositorioDeHorarios,
+  RepositorioDeConsultas,
+  RepositorioDePacientes,
+} = require('../../src/domain/repositorios');
 
 /** Preço cobrado quando o teste não especifica outro. */
 const PRECO_PADRAO = 15000;
 
-class HorariosFalsos {
+class HorariosFalsos extends RepositorioDeHorarios {
   /**
    * @param {Array} horarios
    * @param {Record<string, number>} precos valor em centavos por profissional —
    *        espelha `profissional.valor_consulta_centavos` no banco real.
    */
   constructor(horarios = [], precos = {}) {
+    super();
     this.horarios = new Map(horarios.map((h) => [String(h.id), h]));
     this.precos = precos;
     this.consultas = null; // ligado por criarRepositorios()
@@ -86,17 +98,23 @@ class HorariosFalsos {
     return consulta;
   }
 
-  async liberar(horarioId) {
+  // O segundo argumento existe no contrato (o cliente de uma transação já
+  // aberta) e aqui não tem o que fazer: não há transação em memória.
+  async liberar(horarioId, _executor) {
     const horario = this.horarios.get(String(horarioId));
-    if (!horario) return false;
+    // Mesma cláusula do adaptador: `WHERE id = $1 AND status = 'reservado'`.
+    // Horário bloqueado pela clínica não volta à grade por causa de um
+    // cancelamento.
+    if (!horario || horario.status !== STATUS_HORARIO.RESERVADO) return false;
     horario.status = STATUS_HORARIO.DISPONIVEL;
     horario.versao += 1;
     return true;
   }
 }
 
-class ConsultasFalsas {
+class ConsultasFalsas extends RepositorioDeConsultas {
   constructor() {
+    super();
     this.itens = new Map();
     this.horarioDaConsulta = new Map();
     this.horarios = null;
@@ -111,8 +129,43 @@ class ConsultasFalsas {
     return this.itens.get(String(id)) ?? null;
   }
 
-  async doPaciente(pacienteId) {
-    return [...this.itens.values()].filter((c) => c.pertenceAo(pacienteId));
+  /** Leitura composta, como a do adaptador — ver a nota sobre `profissional`. */
+  async leituraPorId(id) {
+    const consulta = this.itens.get(String(id));
+    if (!consulta) return null;
+    return {
+      consulta,
+      horario: this.horarioDaConsulta.get(String(id)) ?? null,
+      profissional: null,
+    };
+  }
+
+  /**
+   * Mesma forma do adaptador: página de LEITURAS e total do conjunto.
+   *
+   * O `profissional` vem nulo porque este dublê não conhece profissionais — ele
+   * sabe MENOS que o adaptador real, e não mais, que é o lado seguro. Quem
+   * exercita a leitura composta são os testes de integração.
+   */
+  async doPaciente({ pacienteId, limite = 20, deslocamento = 0 }) {
+    const dele = [...this.itens.values()]
+      .filter((c) => c.pertenceAo(pacienteId))
+      // Mesma ordenação do adaptador: `ORDER BY h.inicio DESC, c.id DESC`. Sem
+      // ela, apagar o ORDER BY do SQL não quebraria teste nenhum.
+      .sort((a, b) => {
+        const inicioA = this.horarioDaConsulta.get(String(a.id))?.inicio ?? 0;
+        const inicioB = this.horarioDaConsulta.get(String(b.id))?.inicio ?? 0;
+        return inicioB - inicioA || b.id - a.id;
+      });
+    const pagina = dele.slice(deslocamento, deslocamento + limite);
+    return {
+      itens: pagina.map((consulta) => ({
+        consulta,
+        horario: this.horarioDaConsulta.get(String(consulta.id)) ?? null,
+        profissional: null,
+      })),
+      total: dele.length,
+    };
   }
 
   async existeAtivaNoIntervalo(pacienteId, inicio, fim) {
@@ -127,7 +180,13 @@ class ConsultasFalsas {
 
   async cancelar(consultaId) {
     const consulta = this.itens.get(String(consultaId));
-    if (!consulta) return null;
+    // O adaptador real lê a consulta sob `FOR UPDATE` e deixa o domínio decidir
+    // antes de escrever. Sem repetir isso aqui, o dublê aceitaria cancelar duas
+    // vezes e um teste de caso de uso passaria sobre esse defeito.
+    if (!consulta) {
+      throw new NaoEncontrado('Consulta');
+    }
+    consulta.garantirQuePodeSerCancelada();
     consulta.status = STATUS_CONSULTA.CANCELADA;
     const h = this.horarioDaConsulta.get(String(consultaId));
     if (h) await this.horarios.liberar(h.id);
@@ -169,8 +228,9 @@ function umHorario({ id = 1, profissionalId = 10, inicio, duracaoMin = 30, versa
  * UNIQUE e aqui lança o mesmo erro de domínio — e a auditoria, registrada
  * com os nomes dos campos e nunca com os valores.
  */
-class PacientesFalsos {
+class PacientesFalsos extends RepositorioDePacientes {
   constructor() {
+    super();
     this.itens = new Map();
     this.auditoria = [];
     this.proximoId = 1;
@@ -206,15 +266,36 @@ class PacientesFalsos {
     if (!atual) {
       throw new NaoEncontrado('Paciente');
     }
-    const atualizado = new Paciente({ ...atual, ...campos });
+    // A mesma lista fechada do adaptador (COLUNA_DO_CAMPO): campo fora dela é
+    // ignorado. Aceitar tudo aqui deixaria o dublê mais permissivo que o real
+    // — um teste passaria mesmo se o filtro do caso de uso fosse removido.
+    const permitidos = Object.fromEntries(
+      Object.entries(campos).filter(([campo]) =>
+        ['nome', 'telefone', 'dataNascimento'].includes(campo)
+      )
+    );
+    // Sem campo permitido, o adaptador não roda UPDATE nem audita: devolve o
+    // paciente como está.
+    if (Object.keys(permitidos).length === 0) {
+      return atual;
+    }
+
+    const atualizado = new Paciente({ ...atual, ...permitidos });
     this.itens.set(String(id), atualizado);
     this.auditoria.push({
       acao: 'paciente.atualizado',
       entidadeId: atual.id,
-      detalhe: { campos: Object.keys(campos) },
+      detalhe: { campos: Object.keys(permitidos) },
     });
     return atualizado;
   }
 }
 
-module.exports = { criarRepositorios, umHorario, PRECO_PADRAO, PacientesFalsos };
+module.exports = {
+  criarRepositorios,
+  umHorario,
+  PRECO_PADRAO,
+  HorariosFalsos,
+  ConsultasFalsas,
+  PacientesFalsos,
+};

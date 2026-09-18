@@ -11,12 +11,58 @@
 
 const { z } = require('zod');
 
+/**
+ * Fuso civil da clínica parceira, em Quixadá (CE) — o mesmo usado no seed.
+ * Sem horário de verão desde 2019, então o deslocamento é constante o ano todo
+ * e pode ser escrito direto numa data sem hora.
+ */
+const FUSO_DA_CLINICA = 'America/Fortaleza';
+const DESLOCAMENTO_DA_CLINICA = '-03:00';
+
+/**
+ * Teto para qualquer inteiro que vá parar numa consulta SQL.
+ *
+ * `Number.isInteger(1e21)` é verdadeiro, então sem teto um `?pagina=1e21`
+ * atravessa a validação inteira. O driver serializa números a partir de 1e21 em
+ * notação exponencial ("1e+21"), que o PostgreSQL recusa com 22P02, e acima do
+ * limite de `bigint` recusa com 22003 — nenhum dos dois é erro de domínio, e os
+ * dois viravam 500 numa rota pública, enterrando falhas reais no log.
+ *
+ * MAX_SAFE_INTEGER fica abaixo dos dois limiares e bem acima de qualquer id que
+ * este sistema venha a ter.
+ */
+const MAIOR_INTEIRO = Number.MAX_SAFE_INTEGER;
+
+function comLimites(numero, nomeAmigavel) {
+  return numero
+    .int(`${nomeAmigavel} precisa ser um número inteiro.`)
+    .positive(`${nomeAmigavel} precisa ser maior que zero.`)
+    .max(MAIOR_INTEIRO, `${nomeAmigavel} é grande demais.`);
+}
+
 /** Inteiro positivo vindo de query ou de parâmetro de rota, sempre texto. */
 function inteiroPositivo(nomeAmigavel) {
-  return z.coerce
-    .number({ invalid_type_error: `${nomeAmigavel} precisa ser um número.` })
-    .int(`${nomeAmigavel} precisa ser um número inteiro.`)
-    .positive(`${nomeAmigavel} precisa ser maior que zero.`);
+  return comLimites(
+    z.coerce.number({ invalid_type_error: `${nomeAmigavel} precisa ser um número.` }),
+    nomeAmigavel
+  );
+}
+
+/**
+ * Inteiro positivo vindo de um corpo JSON, onde o tipo já existe.
+ *
+ * Sem coerção, de propósito: `z.coerce.number()` converte `true` em 1 e `["7"]`
+ * em 7, e um `{"horarioId": true}` acabava agendando o horário 1 — um horário
+ * que o paciente nunca viu — em vez de ser recusado.
+ */
+function inteiroPositivoEmCorpo(nomeAmigavel) {
+  return comLimites(
+    z.number({
+      required_error: `Informe ${nomeAmigavel.toLowerCase()}.`,
+      invalid_type_error: `${nomeAmigavel} precisa ser um número.`,
+    }),
+    nomeAmigavel
+  );
 }
 
 /**
@@ -30,7 +76,17 @@ function inteiroPositivo(nomeAmigavel) {
  */
 function data(nomeAmigavel) {
   const mensagem = `${nomeAmigavel} precisa ser uma data válida, no formato ISO 8601.`;
-  return z.coerce.date({ errorMap: () => ({ message: mensagem }) });
+  return z.preprocess(
+    (valor) =>
+      // 'AAAA-MM-DD' sem hora é lido como meia-noite UTC pelo JavaScript, o que
+      // no Ceará é 21h do dia ANTERIOR: pedir a grade de 1º de outubro traria
+      // horários de 30 de setembro à noite e esconderia os do fim do dia 1º.
+      // Quem escreve uma data sem hora está falando do dia na clínica.
+      typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valor)
+        ? `${valor}T00:00:00${DESLOCAMENTO_DA_CLINICA}`
+        : valor,
+    z.coerce.date({ errorMap: () => ({ message: mensagem }) })
+  );
 }
 
 /**
@@ -81,12 +137,6 @@ function telefone() {
       message: 'Informe o telefone com DDD, com 10 ou 11 dígitos.',
     });
 }
-
-/**
- * Fuso civil da clínica parceira, em Quixadá (CE) — o mesmo usado no seed.
- * Sem horário de verão desde 2019.
- */
-const FUSO_DA_CLINICA = 'America/Fortaleza';
 
 /**
  * Data de calendário (AAAA-MM-DD) de um instante, no fuso informado.
@@ -145,8 +195,10 @@ function dataDeNascimento() {
 
 module.exports = {
   FUSO_DA_CLINICA,
+  DESLOCAMENTO_DA_CLINICA,
   dataCivil,
   inteiroPositivo,
+  inteiroPositivoEmCorpo,
   data,
   objetoEstrito,
   nomeDePessoa,

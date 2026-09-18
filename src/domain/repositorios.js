@@ -41,30 +41,73 @@ class RepositorioDeHorarios {
    * informasse, precisaria ter lido o profissional antes, fora da transação,
    * e um reajuste no intervalo produziria cobrança divergente da combinada.
    *
+   * Três desfechos:
+   *   - a consulta criada;
+   *   - `null` quando a reserva não aconteceu porque outra pessoa chegou antes
+   *     — versão desatualizada, ou a rede de segurança do banco recusando uma
+   *     segunda consulta ativa no mesmo horário;
+   *   - exceção de domínio quando o pedido é inadmissível por outra razão:
+   *     profissional desativado, ou consulta sobreposta na agenda do paciente,
+   *     recusada pela restrição `consulta_sem_sobreposicao` (migration 007).
+   *
    * @param {object} dados
    * @param {number|string} dados.horarioId
    * @param {number} dados.versao versão lida pelo cliente
    * @param {number|string} dados.pacienteId
    * @param {Date} dados.reservaExpiraEm
-   * @returns {Promise<import('./Consulta').Consulta|null>} a consulta criada,
-   *          ou `null` se a versão não conferia (outra pessoa chegou antes).
+   * @returns {Promise<import('./Consulta').Consulta|null>}
    */
   async reservarEAgendar(_dados) {
     naoImplementado('RepositorioDeHorarios.reservarEAgendar');
   }
 
-  /** Devolve o horário à grade, incrementando a versão. */
-  async liberar(_horarioId) {
+  /**
+   * Devolve o horário à grade, incrementando a versão.
+   *
+   * Só age sobre horário `reservado`: o que a clínica bloqueou continua
+   * bloqueado. O segundo argumento, opcional, permite rodar dentro de uma
+   * transação já aberta — é como o cancelamento libera o horário junto com a
+   * mudança de estado da consulta.
+   *
+   * @returns {Promise<boolean>} se o horário voltou para a grade.
+   */
+  async liberar(_horarioId, _executor) {
     naoImplementado('RepositorioDeHorarios.liberar');
   }
 }
 
+/**
+ * Uma LEITURA de consulta é `{ consulta, horario, profissional }`.
+ *
+ * As telas do aplicativo mostram data, profissional e especialidade junto com
+ * a consulta; devolver só a entidade obrigaria o cliente a uma requisição por
+ * item da lista. A entidade continua sendo o que as regras de negócio usam —
+ * a leitura é só a forma de apresentar.
+ */
 class RepositorioDeConsultas {
+  /** @returns {Promise<import('./Consulta').Consulta|null>} */
   async porId(_id) {
     naoImplementado('RepositorioDeConsultas.porId');
   }
 
-  async doPaciente(_pacienteId) {
+  /** @returns {Promise<{consulta, horario, profissional}|null>} */
+  async leituraPorId(_id) {
+    naoImplementado('RepositorioDeConsultas.leituraPorId');
+  }
+
+  /**
+   * Página do histórico do paciente, da consulta mais distante no futuro para a
+   * mais antiga (`inicio` decrescente, id como desempate). Inclui as canceladas:
+   * elas são matéria-prima da análise de absenteísmo, que é o problema central
+   * do trabalho.
+   *
+   * Uma tela de "próxima consulta" NÃO deve usar o primeiro item desta lista —
+   * ele é o compromisso mais longínquo, não o mais próximo.
+   *
+   * @param {{pacienteId: number, limite: number, deslocamento: number}} _filtros
+   * @returns {Promise<{itens: Array, total: number}>} itens são leituras.
+   */
+  async doPaciente(_filtros) {
     naoImplementado('RepositorioDeConsultas.doPaciente');
   }
 
@@ -73,7 +116,17 @@ class RepositorioDeConsultas {
     naoImplementado('RepositorioDeConsultas.existeAtivaNoIntervalo');
   }
 
-  /** Cancela e libera o horário, na mesma transação. */
+  /**
+   * Cancela e libera o horário, na mesma transação.
+   *
+   * Relê o estado sob bloqueio de linha antes de cancelar: entre a verificação
+   * do caso de uso e esta escrita cabe outro cancelamento da mesma consulta.
+   * Lança `NaoEncontrado` se a consulta não existir e o erro de estado do
+   * domínio se ela não admitir mais cancelamento.
+   *
+   * @returns {Promise<import('./Consulta').Consulta>} a consulta já cancelada —
+   *          é ela que a resposta HTTP devolve, com valor e horário.
+   */
   async cancelar(_consultaId) {
     naoImplementado('RepositorioDeConsultas.cancelar');
   }

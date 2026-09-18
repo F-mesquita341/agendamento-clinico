@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * Prova do portão da Etapa 5, com tokens REAIS emitidos pelo Firebase.
+ * Prova dos portões das Etapas 5 e 6, com tokens REAIS emitidos pelo Firebase.
  *
  * A suíte automatizada usa um verificador de token falso, para rodar sem rede
  * e sem credencial. Este script fecha a lacuna: autentica os dois usuários de
  * teste no Firebase de verdade, chama a API em execução com cada token e
- * confere que cada um só alcança o próprio perfil.
+ * confere que cada um só alcança o próprio perfil — e, desde a Etapa 6, que
+ * dois pacientes disputando o mesmo horário produzem um agendamento e um 409.
  *
  * Feito para ser executado por você, no seu terminal. Senhas e chave de API
  * entram por variável de ambiente da sessão e nunca são impressas — nem o
@@ -60,6 +61,7 @@ async function obterTokenReal(email, senha) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password: senha, returnSecureToken: true }),
+      signal: AbortSignal.timeout(PRAZO_MS),
     }
   );
   const corpo = await resposta.json();
@@ -71,6 +73,14 @@ async function obterTokenReal(email, senha) {
   return corpo.idToken;
 }
 
+/**
+ * Prazo de cada chamada. Sem ele, uma API que aceita a conexão e nunca responde
+ * deixava o script parado em silêncio, sem dizer o que esperava. Foi o que
+ * aconteceu na primeira execução da Etapa 6: o terminal da API estava em modo
+ * de seleção, que no Windows congela o processo na próxima escrita na tela.
+ */
+const PRAZO_MS = 15_000;
+
 async function api(metodo, caminho, { token, corpo } = {}) {
   let resposta;
   try {
@@ -81,8 +91,17 @@ async function api(metodo, caminho, { token, corpo } = {}) {
         ...(corpo ? { 'Content-Type': 'application/json' } : {}),
       },
       body: corpo ? JSON.stringify(corpo) : undefined,
+      signal: AbortSignal.timeout(PRAZO_MS),
     });
   } catch (erro) {
+    if (erro.name === 'TimeoutError') {
+      throw new Error(
+        `a API aceitou a conexão mas não respondeu a ${metodo} ${caminho} em ` +
+          `${PRAZO_MS / 1000} s. Olhe a janela onde ela está rodando: se o título ` +
+          'começar com "Selecionar", aperte Esc nela — no Windows, esse modo congela ' +
+          'o processo.'
+      );
+    }
     // "fetch failed" sozinho não diz nada. A causa real — conexão recusada,
     // conexão derrubada no meio — fica em `erro.cause`.
     const causa = erro.cause ? `${erro.cause.code ?? ''} ${erro.cause.message ?? ''}`.trim() : erro.message;
@@ -121,6 +140,67 @@ async function garantirPerfil(rotulo, usuario) {
   return perfil;
 }
 
+/**
+ * Procura um horário livre na grade e faz A e B disputarem-no.
+ *
+ * Usa a MESMA versão nos dois pedidos, que é o que acontece quando as duas
+ * pessoas abriram a tela antes de qualquer uma confirmar. Ao final, cancela o
+ * que foi criado: o banco de desenvolvimento volta ao estado anterior.
+ */
+async function verificarAgendamento() {
+  const catalogo = await api('GET', '/profissionais', { token: USUARIOS.A.token });
+  const profissional = catalogo.corpo?.profissionais?.[0];
+  if (!profissional) {
+    console.log('  – nenhum profissional cadastrado; rode "npm run seed" antes.');
+    return;
+  }
+
+  const grade = await api('GET', `/profissionais/${profissional.id}/horarios`);
+  const horario = grade.corpo?.horarios?.[0];
+  if (!horario) {
+    console.log(`  – ${profissional.nome} está sem horários livres; rode "npm run seed".`);
+    return;
+  }
+
+  const pedido = { horarioId: horario.id, versao: horario.versao };
+  const daA = await api('POST', '/consultas', { token: USUARIOS.A.token, corpo: pedido });
+  conferir('A agenda o horário → 201', daA.status === 201, `HTTP ${daA.status}`);
+  conferir(
+    'a consulta nasce com o preço do profissional',
+    daA.corpo?.consulta?.valorCentavos === profissional.valorCentavos,
+    `${daA.corpo?.consulta?.valorCentavos} ≠ ${profissional.valorCentavos}`
+  );
+
+  // B ainda tem em mãos a versão que leu antes de A confirmar.
+  const daB = await api('POST', '/consultas', { token: USUARIOS.B.token, corpo: pedido });
+  conferir('B, com a versão antiga, → 409', daB.status === 409, `HTTP ${daB.status}`);
+  conferir(
+    'o 409 diz ao aplicativo para recarregar a grade',
+    daB.corpo?.erro?.acao === 'recarregar_horarios'
+  );
+
+  const consultaId = daA.corpo?.consulta?.id;
+  // 404, e não 403: consulta alheia responde como se não existisse, para que
+  // ninguém possa contar os registros da clínica percorrendo ids.
+  const espiada = await api('GET', `/consultas/${consultaId}`, { token: USUARIOS.B.token });
+  conferir('B não enxerga a consulta de A → 404', espiada.status === 404, `HTTP ${espiada.status}`);
+
+  const listaDeB = await api('GET', '/consultas', { token: USUARIOS.B.token });
+  conferir(
+    'a lista de B não contém a consulta de A',
+    !(listaDeB.corpo?.consultas ?? []).some((c) => c.id === consultaId)
+  );
+
+  const cancelamento = await api('PATCH', `/consultas/${consultaId}/cancelamento`, {
+    token: USUARIOS.A.token,
+  });
+  conferir('A cancela a própria consulta → 200', cancelamento.status === 200, `HTTP ${cancelamento.status}`);
+
+  const gradeDepois = await api('GET', `/profissionais/${profissional.id}/horarios`);
+  const devolvido = (gradeDepois.corpo?.horarios ?? []).find((h) => h.id === horario.id);
+  conferir('o horário volta à grade com a versão adiantada', devolvido?.versao === horario.versao + 2);
+}
+
 async function principal() {
   const ausentes = [
     ['FIREBASE_WEB_API_KEY', CHAVE],
@@ -136,9 +216,16 @@ async function principal() {
   }
 
   console.log(`\nAPI: ${API}`);
-  const saude = await api('GET', '/saude').catch(() => null);
-  if (!saude || saude.status !== 200) {
-    abortar('A API não respondeu em /saude. Suba-a em outro terminal com: npm run dev');
+  let saude;
+  try {
+    saude = await api('GET', '/saude');
+  } catch (erro) {
+    // Conexão recusada quer dizer API desligada; prazo estourado quer dizer API
+    // ligada mas travada. A mensagem de `api()` já distingue os dois casos.
+    abortar(`${erro.message}\nSe a API não estiver rodando, suba-a em outro terminal com: npm run dev`);
+  }
+  if (saude.status !== 200) {
+    abortar(`A API respondeu /saude com HTTP ${saude.status}: o banco pode estar indisponível.`);
   }
 
   console.log('\n1. Tokens reais do Firebase');
@@ -176,10 +263,15 @@ async function principal() {
   const semToken = await api('GET', '/pacientes/me');
   conferir('requisição sem token → 401', semToken.status === 401, `HTTP ${semToken.status}`);
 
+  console.log('\n5. Agendamento disputado, com tokens reais');
+  await verificarAgendamento();
+
   console.log(
     falhas
       ? `\n${falhas} verificação(ões) falharam.\n`
-      : '\nPortão da Etapa 5 atingido: token real autentica de ponta a ponta, e cada paciente só alcança o próprio perfil.\n'
+      : '\nPortões das Etapas 5 e 6 atingidos: token real autentica de ponta a ponta,\n' +
+          'cada paciente só alcança o que é seu, e dois pedidos pelo mesmo horário\n' +
+          'produzem exatamente um agendamento.\n'
   );
   process.exitCode = falhas ? 1 : 0;
 }
