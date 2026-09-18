@@ -10,8 +10,8 @@
  *
  * O paciente vem sempre do token, via `carregarPaciente` — nenhuma rota aceita
  * id de paciente. Um id de CONSULTA na URL é inevitável, e por isso o dono é
- * verificado em toda leitura e escrita: consulta de outra pessoa responde 403,
- * decisão que o domínio já toma em `Consulta.garantirQuePodeSerCanceladaPor`.
+ * verificado em toda leitura e escrita. Consulta de outra pessoa responde 404,
+ * igual a consulta inexistente — ver `semRevelarExistencia`, abaixo.
  *
  * Fábrica, como em rotas/pacientes.js, porque o verificador de token é
  * injetado: o real em produção, um falso nos testes.
