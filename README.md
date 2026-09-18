@@ -139,8 +139,7 @@ interpretar o texto da mensagem.
 | 200 / 201 / 204 | Sucesso, criado, sem conteúdo |
 | 400 | Requisição malformada |
 | 401 | Token ausente, expirado ou inválido |
-| 403 | O recurso pertence a outro paciente |
-| 404 | Não existe |
+| 404 | Não existe — ou pertence a outro paciente, sem distinção |
 | 409 | Conflito de concorrência ou de estado |
 | 422 | Regra de negócio violada |
 | 500 | Erro interno |
@@ -160,11 +159,20 @@ UPDATE horario
 Se nenhuma linha for afetada, outra pessoa chegou primeiro: a transação é
 desfeita e a API responde **409** com a instrução de recarregar a grade.
 
-Há ainda uma segunda defesa, no próprio banco: o índice único parcial
-`consulta_horario_ativo` impede duas consultas ativas no mesmo horário mesmo que
-algum caminho futuro esqueça de comparar a versão. Ele é *parcial* — ignora
-consultas canceladas — porque um horário cancelado precisa voltar a ser
-agendável, enquanto o registro do cancelamento permanece para o histórico.
+Há ainda duas defesas no próprio banco, porque toda regra que compara estado
+antes de gravar tem uma janela em que dois pedidos passam juntos:
+
+- o índice único parcial `consulta_horario_ativo` impede duas consultas ativas
+  no mesmo **horário**, mesmo que algum caminho futuro esqueça de comparar a
+  versão;
+- a restrição de exclusão `consulta_sem_sobreposicao` impede duas consultas
+  ativas sobrepostas na agenda do mesmo **paciente**. O lock otimista não cobre
+  esse caso: dois pedidos simultâneos para horários diferentes reservam linhas
+  diferentes, sem nada em comum para disputar.
+
+As duas são *parciais* — ignoram consultas canceladas — porque um horário
+cancelado precisa voltar a ser agendável, enquanto o registro do cancelamento
+permanece para o histórico.
 
 ## Agendamento
 
@@ -192,7 +200,15 @@ anterior em mãos precisa recarregar a grade.
 | `HORARIO_NO_PASSADO` (422) | — | O horário já começou |
 | `PROFISSIONAL_INDISPONIVEL` (422) | — | O profissional foi desativado |
 | `CONSULTA_JA_CANCELADA` (422) | — | Cancelamento repetido |
-| `ACESSO_NEGADO` (403) | — | A consulta pertence a outro paciente |
+| `NAO_ENCONTRADO` (404) | — | A consulta não existe **ou pertence a outro paciente** |
+
+Consulta de outro paciente responde exatamente como consulta inexistente. Um
+403 não informaria nada ao dono legítimo, que nunca o recebe, e permitiria a
+qualquer paciente autenticado contar os registros da clínica percorrendo ids.
+
+Na grade, `?de=` e `?ate=` aceitam instante ISO 8601 ou data sem hora
+(`AAAA-MM-DD`), lida como meia-noite **no fuso da clínica**, `America/Fortaleza`.
+Janela com fim anterior ao início responde `JANELA_INVALIDA` (422).
 
 ## Autenticação
 

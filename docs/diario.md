@@ -580,3 +580,80 @@ inativo e o middleware que resolve o paciente do token.
 **219 testes passando.**
 
 ---
+
+## 18/09/2026 — Revisão local do código inteiro
+
+A revisão em nuvem ficou indisponível — a cota gratuita acabou —, então a
+revisão foi feita localmente, sobre todo o `src/`, com cinco ângulos de busca
+independentes: varredura linha a linha, rastreamento de contratos entre
+arquivos, armadilhas de linguagem e de SQL, adaptadores e concorrência, e
+limpeza. Quinze achados sobreviveram à verificação. Nove foram corrigidos agora;
+seis ficaram para as etapas em que fazem sentido.
+
+**O mais grave repetia o padrão de dois dias atrás.** A regra "o paciente não
+fica em dois lugares ao mesmo tempo" era verificada por uma leitura fora da
+transação, e nada no banco a garantia. Dois pedidos simultâneos para horários
+DIFERENTES e sobrepostos passavam juntos: cada um reservava a sua própria linha
+de horário, versões distintas, nada em comum para disputar — o lock otimista
+não tinha o que proteger. O teste existente rodava em sequência e passava. Três
+dos cinco ângulos encontraram isso de forma independente.
+
+O teste novo, com os dois pedidos em paralelo, foi escrito ANTES da correção e
+falhou com dois 201 — o defeito observado, não apenas raciocinado. A correção é
+a migration 007: uma restrição de exclusão `EXCLUDE USING gist (paciente_id
+WITH =, periodo WITH &&)`, parcial como o índice de horário. Exigiu copiar o
+período do horário para a consulta, porque uma restrição só enxerga a própria
+tabela — o que tem um efeito colateral bom: a duração combinada fica congelada
+junto com o preço.
+
+É a quinta ocorrência de teste verde sobre defeito neste trabalho, e a segunda
+do mesmo tipo em dois dias. Deixou de ser acaso e virou regra de projeto: **toda
+regra que compara estado antes de gravar precisa de rede de segurança no
+banco.** No horário, o índice parcial; no cancelamento, o `FOR UPDATE`; na
+agenda do paciente, a restrição de exclusão.
+
+**500 em rota pública.** `Number.isInteger(1e21)` é verdadeiro, então
+`?pagina=1e21` atravessava a validação; o driver serializava o número como
+"1e+21" e o PostgreSQL recusava. Qualquer pessoa, sem token, gerava erro
+interno no log à vontade. Confirmado com requisição real antes de corrigir.
+
+**Coerção no corpo JSON.** O esquema de inteiro usado nas rotas converte texto
+em número, o que faz sentido em query string. No corpo do agendamento, convertia
+`true` em 1 — e `{"horarioId": true}` agendava o horário 1, que o paciente nunca
+viu. O corpo passou a usar um esquema sem coerção.
+
+**A grade lia datas em UTC.** `?de=2026-10-01` virava 30 de setembro às 21h em
+Quixadá. O mesmo erro já tinha aparecido na data de nascimento, na Etapa 5, e a
+correção de lá não tinha sido estendida à grade.
+
+**Consulta de outro paciente passou a responder 404.** A decisão anterior, 403,
+tinha um custo que não fora pesado: o dono legítimo nunca recebe 403, então a
+distinção não informava nada a quem tinha direito, e permitia a qualquer
+paciente autenticado contar os registros da clínica percorrendo ids. O domínio
+continua lançando `AcessoNegado`; a política de não revelar existência é da
+fronteira HTTP.
+
+**Dublês que não cumpriam o contrato.** Nenhum dos três estendia a classe
+abstrata do domínio, e um deles não tinha `leituraPorId`. Agora estendem, e um
+teste de arquitetura compara os métodos do contrato com os de cada dublê — ele
+aponta pelo nome o método que falta.
+
+**Mais um teste verde, pego a tempo.** O primeiro teste da ordenação estável
+passou mesmo sem a correção: numa tabela pequena o PostgreSQL devolve as linhas
+na ordem física, que coincidia com a do id. Foi reescrito gravando as duas
+linhas em ordem física inversa, e aí falhou com o defeito. É o mesmo cuidado de
+ontem, aplicado a mim mesmo no mesmo dia: sem reintroduzir o defeito, esse teste
+teria entrado no repositório provando nada.
+
+**Adiados, com motivo:** revogação de token e tempos limite de transação e do
+healthcheck ficam para a Etapa 10, que é a de endurecimento; o desligamento
+gracioso, para a Etapa 8, quando houver um Render de verdade para observar; a
+consulta única com CTE no caminho do agendamento, para o início da Etapa 7, onde
+dá para medir o ganho antes e depois; e as quatro duplicações de código, para a
+Etapa 10, já que o escopo escolhido foi só correção.
+
+Cada correção foi confirmada reintroduzindo o defeito.
+
+**235 testes passando.**
+
+---
