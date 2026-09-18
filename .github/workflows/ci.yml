@@ -49,3 +49,10 @@ jobs:
 
       - name: Rodar a suíte
         run: npm test
+
+      # O critério da Seção 4.5, verificado a cada envio: 10 rodadas de cem
+      # pedidos simultâneos pelo mesmo horário, zero agendamentos duplicados.
+      # Em modo ensaio, porque os relatórios oficiais vêm de execuções
+      # documentadas, não do runner.
+      - name: Teste de concorrência (Seção 4.5)
+        run: npm run carga -- --ensaio
