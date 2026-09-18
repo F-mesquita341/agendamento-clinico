@@ -685,3 +685,93 @@ caminhos foram testados contra um servidor que aceita e nunca responde e
 contra uma porta vazia.
 
 ---
+
+## 18/09/2026 — Etapa 7: teste de concorrência
+
+O critério da Seção 4.5 — "zero conflitos detectados no teste de carga simples
+com cem requisições simultâneas para o mesmo horário" — foi atendido: **10 de
+10 rodadas aprovadas pelo HTTP e 10 de 10 direto no adaptador, zero
+agendamentos duplicados.** Relatórios em `docs/resultados/concorrencia/`.
+
+**Duas fases, porque são duas perguntas.** Pelo HTTP, o caminho completo da API
+responde se o sistema aguenta. Direto no adaptador, sem a checagem prévia do
+caso de uso, responde se é o lock que garante. Cem pacientes distintos por
+rodada: com o mesmo paciente, parte das recusas viria da regra de agenda
+sobreposta e o número misturaria dois fenômenos.
+
+**Vocabulário fixado.** Conflito é agendamento duplicado. O `409` de quem perdeu
+a disputa é recusa, e 99 por rodada é o resultado correto. O HTTP chama o 409 de
+*Conflict*; o relatório e a monografia precisam separar as palavras, ou um
+avaliador lê "99 conflitos" onde há 99 acertos.
+
+**O resultado mais interessante contrariou o que eu temia.** A preocupação era
+que a checagem prévia do caso de uso absorvesse as recusas — o pedido lê o
+horário já reservado e é recusado antes da transação —, e o experimento passasse
+sem nunca exercitar o lock. Por isso a fase HTTP ganhou um contador que separa
+as duas camadas. Resultado: **100% das recusas, em todas as rodadas, foram
+decididas pelo `UPDATE` com a versão; nenhuma pela checagem prévia.** A causa é a
+fila do pool de conexões: as cem requisições enfileiram suas leituras antes de
+qualquer transação começar, então todas leem o horário livre e chegam juntas ao
+UPDATE. Contenção máxima exatamente no mecanismo que se queria medir — agora
+medido, não suposto.
+
+O mesmo fenômeno explica por que o vencedor leva cerca de 2 segundos: as
+leituras prévias das cem requisições passam na frente dele na fila.
+
+**Simultaneidade real.** As cem requisições chegam ao servidor em 4 a 9 ms. A
+medida é o instante de chegada ao servidor, e não o de disparo no cliente — o
+laço que cria as cem promessas leva menos de um milissegundo e não diria nada.
+
+**O detector foi testado antes de ser usado.** O sistema não produz duplicidade
+sem desmontar três defesas ao mesmo tempo, então não há defeito a reintroduzir
+no código para ver o experimento falhar. As funções que avaliam cada rodada
+foram separadas e testadas com entradas sintéticas — dois 201, duas consultas no
+banco, um 500, um 422, resposta faltando, valor errado —, e cada uma sai
+reprovada.
+
+**A otimização medida.** A transação do agendamento fazia duas idas ao banco
+antes de inserir a consulta: o UPDATE e a leitura do profissional. Uma CTE as
+juntou. Comparando as medianas das duas execuções oficiais:
+
+| | antes | depois | diferença |
+|---|---|---|---|
+| Fase HTTP, duração da rodada | 3978 ms | 3873 ms | −2,6% |
+| Fase HTTP, latência do vencedor | 2070 ms | 2008 ms | −3,0% |
+| Fase HTTP, p50 das 1000 requisições | 3159 ms | 3051 ms | −3,4% |
+| Adaptador, p50 das 1000 chamadas | 1428 ms | 1287 ms | −9,9% |
+
+Todas as métricas andaram na mesma direção, e o ganho do vencedor, 62 ms, é da
+ordem de uma ida ao Neon — exatamente o que a mudança elimina. Mas é uma
+execução de cada lado, com cinco minutos de distância e faixas que se
+sobrepõem. **É indício consistente, não prova estatística**, e é assim que deve
+aparecer no Capítulo 6. Para afirmar mais, seria preciso alternar várias
+execuções de cada versão.
+
+A CTE tem uma armadilha, registrada no código: o UPDATE dentro dela acontece
+mesmo que o SELECT de fora não devolva linha. Com JOIN interno, um profissional
+ausente faria o horário ser reservado e o método responder como se a versão não
+conferisse. Com LEFT JOIN, cai na recusa, e o ROLLBACK desfaz a reserva. Os
+defeitos de preço e de profissional inativo foram reintroduzidos sobre o código
+novo e derrubaram os dois testes certos.
+
+**Para a monografia:**
+
+- A Seção 3.8.3 diz que a coluna de versão fica "na tabela de consultas"; a
+  implementação a põe em `horario`, que é o recurso disputado — quando duas
+  pessoas competem, a consulta ainda não existe. O texto precisa de ajuste.
+- Na disputa por um horário novo, o próprio `status = 'disponivel'` do UPDATE já
+  impede duplicidade. O papel que só a versão cumpre é recusar a leitura
+  desatualizada do tipo ABA — disponível, reservado, cancelado, disponível de
+  novo, e alguém agendando com a tela antiga —, coberto por teste próprio. O
+  teste de carga prova a **combinação** das defesas; atribuir o resultado só ao
+  lock otimista seria impreciso.
+- Limitações declaradas no próprio relatório: cliente e servidor no mesmo
+  processo; verificador de token falso, sem o custo da assinatura do JWT;
+  máquina local contra o Neon em São Paulo; um único horário por rodada.
+
+A integração contínua passa a rodar o teste de concorrência em modo ensaio a
+cada envio — quando o repositório remoto existir.
+
+**260 testes passando.**
+
+---
