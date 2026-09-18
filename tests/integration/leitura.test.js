@@ -3,6 +3,7 @@
 const request = require('supertest');
 const { iniciar, parar } = require('../helpers/servidor');
 const { semear } = require('../helpers/semente');
+const { consultar } = require('../../src/infra/db/pool');
 
 let servidor;
 let dados;
@@ -235,6 +236,85 @@ describe('paginação', () => {
     expect(r.status).toBe(200);
     expect(r.body.profissionais).toEqual([]);
     expect(r.body.paginacao.total).toBe(2);
+  });
+
+  test.each([
+    ['página astronômica', '/profissionais?pagina=1e21'],
+    ['página acima do limite de bigint', '/profissionais?pagina=500000000000000000'],
+    ['especialidade astronômica', '/profissionais?especialidade=1e23'],
+    ['id astronômico na rota', '/profissionais/99999999999999999999999'],
+  ])('%s é recusada pela validação, sem virar erro interno', async (_rotulo, caminho) => {
+    // Number.isInteger(1e21) é verdadeiro: sem teto, esses valores atravessavam
+    // a validação e o PostgreSQL é que recusava — 500 numa rota pública, aberta
+    // a qualquer pessoa, enterrando falhas de verdade no log.
+    const r = await request(servidor).get(caminho);
+
+    expect(r.status).toBe(422);
+    expect(r.body.erro.codigo).toBe('DADOS_INVALIDOS');
+  });
+});
+
+describe('estabilidade da paginação', () => {
+  let homonimas = [];
+
+  // Ids explícitos, gravados em ordem física INVERSA à do id: o de id maior
+  // entra primeiro. Numa tabela pequena o PostgreSQL devolve as linhas na ordem
+  // física, e com ids em sequência essa ordem coincidiria com a do id — o teste
+  // passaria mesmo sem o desempate. Foi o que aconteceu na primeira versão dele.
+  const MAIOR = 900_002;
+  const MENOR = 900_001;
+
+  beforeAll(async () => {
+    for (const [id, crm] of [
+      [MAIOR, 'CRM-CE 90002'],
+      [MENOR, 'CRM-CE 90001'],
+    ]) {
+      await consultar(
+        `INSERT INTO profissional
+           (id, clinica_id, especialidade_id, nome, registro_conselho,
+            valor_consulta_centavos, ativo)
+         VALUES ($1, $2, $3, 'Zulmira Homônima', $4, 10000, TRUE)`,
+        [id, dados.clinicaId, dados.especialidades.cardiologia, crm]
+      );
+    }
+    homonimas = [MENOR, MAIOR];
+  });
+
+  afterAll(() => consultar('DELETE FROM profissional WHERE id = ANY($1)', [homonimas]));
+
+  test('homônimas saem em ordem de id, sem se repetir entre páginas', async () => {
+    // Com ORDER BY p.nome sozinho, o desempate entre nomes iguais é arbitrário:
+    // a mesma pessoa podia aparecer nas duas páginas enquanto a outra sumia.
+    // O contrato é nome e, no empate, id.
+    const primeira = await request(servidor).get('/profissionais?q=Zulmira&limite=1&pagina=1');
+    const segunda = await request(servidor).get('/profissionais?q=Zulmira&limite=1&pagina=2');
+
+    expect(primeira.body.paginacao.total).toBe(2);
+    expect(primeira.body.profissionais[0].id).toBe(MENOR);
+    expect(segunda.body.profissionais[0].id).toBe(MAIOR);
+  });
+});
+
+describe('janela de horários', () => {
+  test('janela invertida é recusada, em vez de fingir grade vazia', async () => {
+    const r = await request(servidor).get(
+      `/profissionais/${dados.profissionais.jose}/horarios?ate=2020-01-01`
+    );
+
+    expect(r.status).toBe(422);
+    expect(r.body.erro.codigo).toBe('JANELA_INVALIDA');
+  });
+
+  test('data sem hora é lida no fuso da clínica, não em UTC', async () => {
+    // Meia-noite em Fortaleza é 03:00 UTC. Lida como UTC, a janela começaria
+    // às 21h do dia anterior e traria horários do dia errado.
+    const daquiATresDias = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const r = await request(servidor).get(
+      `/profissionais/${dados.profissionais.jose}/horarios?de=${daquiATresDias}`
+    );
+
+    expect(r.status).toBe(200);
+    expect(r.body.periodo.de).toBe(`${daquiATresDias}T03:00:00.000Z`);
   });
 });
 

@@ -7,7 +7,7 @@ const {
   RepositorioDeProfissionaisPg,
 } = require('../../../infra/db/RepositorioDeProfissionaisPg');
 const { RepositorioDeHorariosPg } = require('../../../infra/db/RepositorioDeHorariosPg');
-const { NaoEncontrado } = require('../../../domain/erros');
+const { NaoEncontrado, RegraDeNegocio } = require('../../../domain/erros');
 const { validar } = require('../validacao');
 const { inteiroPositivo, data } = require('../esquemas');
 const apresentar = require('../apresentadores');
@@ -114,6 +114,17 @@ rotas.get('/:id/horarios', async (req, res, next) => {
 
     const limiteDaJanela = new Date(de.getTime() + JANELA_MAXIMA_DIAS * 86_400_000);
     const fim = ate > limiteDaJanela ? limiteDaJanela : ate;
+
+    // Havia teto para a janela, mas não piso: um `ate` anterior ao `de` — data
+    // digitada errada no filtro, ou um `ate` no passado, já que `de` nunca é
+    // anterior a agora — devolvia 200 com lista vazia e um período invertido.
+    // O profissional parecia sem agenda, e nada no log dizia por quê.
+    if (fim <= de) {
+      throw new RegraDeNegocio(
+        'JANELA_INVALIDA',
+        'A data final precisa ser posterior à inicial, e no futuro.'
+      );
+    }
 
     const disponiveis = await horarios.disponiveisDoProfissional(id, de, fim);
 

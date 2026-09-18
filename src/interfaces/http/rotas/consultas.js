@@ -30,23 +30,27 @@ const { NaoEncontrado, AcessoNegado } = require('../../../domain/erros');
 const { criarAutenticar } = require('../middlewares/autenticar');
 const { criarCarregarPaciente } = require('../middlewares/carregarPaciente');
 const { validar } = require('../validacao');
-const { objetoEstrito, inteiroPositivo } = require('../esquemas');
+const { objetoEstrito, inteiroPositivo, inteiroPositivoEmCorpo } = require('../esquemas');
 const apresentar = require('../apresentadores');
 
 const LIMITE_PADRAO = 20;
 
+/** `horario.versao` é INTEGER no banco; acima disso o PostgreSQL recusa. */
+const MAIOR_VERSAO = 2_147_483_647;
+
 const corpoDoAgendamento = objetoEstrito(
   {
-    horarioId: inteiroPositivo('O horário'),
+    horarioId: inteiroPositivoEmCorpo('O horário'),
     // Zero é versão legítima — todo horário nasce na versão 0 —, então aqui
-    // não serve `inteiroPositivo`.
+    // não serve `inteiroPositivoEmCorpo`.
     versao: z
       .number({
         required_error: 'A versão do horário é obrigatória. Recarregue a lista de horários.',
         invalid_type_error: 'A versão do horário precisa ser um número inteiro.',
       })
       .int('A versão do horário precisa ser um número inteiro.')
-      .min(0, 'A versão do horário precisa ser um número inteiro.'),
+      .min(0, 'A versão do horário precisa ser um número inteiro.')
+      .max(MAIOR_VERSAO, 'Versão de horário inexistente. Recarregue a lista de horários.'),
   },
   'O corpo do agendamento'
 );
@@ -59,6 +63,21 @@ const paginacao = z.object({
     .max(100, 'O limite máximo por página é 100.')
     .default(LIMITE_PADRAO),
 });
+
+/**
+ * Consulta de outro paciente responde 404, não 403.
+ *
+ * O dono legítimo nunca receberia 403, então distinguir "existe, mas não é seu"
+ * de "não existe" não informa nada a quem tem direito à informação — e permite
+ * que qualquer paciente autenticado percorra /consultas/1..N e descubra quantos
+ * registros de saúde a clínica tem, e com que ritmo eles crescem.
+ *
+ * O domínio continua falando em `AcessoNegado`, que é o que de fato aconteceu;
+ * não revelar a existência é política da fronteira HTTP, e é aqui que ela mora.
+ */
+function semRevelarExistencia(erro) {
+  return erro instanceof AcessoNegado ? new NaoEncontrado('Consulta') : erro;
+}
 
 function criarRotasDeConsultas({
   verificarToken,
@@ -138,15 +157,13 @@ function criarRotasDeConsultas({
       if (!leitura) {
         throw new NaoEncontrado('Consulta');
       }
-      // 403, e não 404: a consulta existe, e esconder isso não protege ninguém
-      // — o dono legítimo precisa de resposta diferente de "não existe".
       if (!leitura.consulta.pertenceAo(req.paciente.id)) {
         throw new AcessoNegado('Esta consulta pertence a outro paciente.');
       }
 
       res.json({ consulta: apresentar.consulta(leitura.consulta, leitura) });
     } catch (erro) {
-      next(erro);
+      next(semRevelarExistencia(erro));
     }
   });
 
@@ -161,7 +178,7 @@ function criarRotasDeConsultas({
 
       res.json({ consulta: apresentar.consulta(consulta) });
     } catch (erro) {
-      next(erro);
+      next(semRevelarExistencia(erro));
     }
   });
 

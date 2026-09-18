@@ -185,6 +185,23 @@ describe('POST /consultas', () => {
     expect(r.body.erro.codigo).toBe('CONSULTA_SOBREPOSTA');
   });
 
+  test('dois pedidos simultâneos em horários sobrepostos: só um vence', async () => {
+    // Horários DIFERENTES, no mesmo instante, com profissionais diferentes. O
+    // lock otimista não protege este caso: cada pedido reserva a sua própria
+    // linha de horário, sem chave em comum. As duas checagens de agenda rodam
+    // antes de qualquer gravação e as duas veem "sem conflito" — por isso quem
+    // precisa recusar é o banco.
+    const respostas = await Promise.all([
+      agendar(comoA, { horarioId: dados.horarios.amanha, versao: 0 }),
+      agendar(comoA, { horarioId: dados.horarios.amanhaComInes, versao: 0 }),
+    ]);
+    const status = respostas.map((r) => r.status).sort();
+
+    expect(status).toEqual([201, 422]);
+    expect(respostas.find((r) => r.status === 422).body.erro.codigo).toBe('CONSULTA_SOBREPOSTA');
+    expect(await contarConsultas("status <> 'cancelada'")).toBe(1);
+  });
+
   test('outro paciente pode usar o mesmo instante com outro profissional', async () => {
     await agendado(comoA, dados.horarios.amanha, 0);
     await agendado(comoB, dados.horarios.amanhaComInes, 0);
@@ -198,6 +215,13 @@ describe('POST /consultas', () => {
     ['sem horário', { versao: 0 }],
     ['campo não permitido', { horarioId: 1, versao: 0, pacienteId: 2 }],
     ['nome em snake_case', { horario_id: 1, versao: 0 }],
+    // z.coerce.number() converteria estes três em 1, 7 e 5 — e agendaria um
+    // horário que o paciente não escolheu.
+    ['horário booleano', { horarioId: true, versao: 0 }],
+    ['horário em array', { horarioId: [7], versao: 0 }],
+    ['horário em texto', { horarioId: '5', versao: 0 }],
+    ['horário grande demais', { horarioId: 1e21, versao: 0 }],
+    ['versão acima do limite da coluna', { horarioId: 1, versao: 2_147_483_648 }],
   ])('corpo inválido (%s) é 422 em português', async (_rotulo, corpo) => {
     const r = await agendar(comoA, corpo);
 
@@ -304,13 +328,16 @@ describe('GET /consultas/:id', () => {
     });
   });
 
-  test('consulta de outro paciente é 403, não 404', async () => {
+  test('consulta de outro paciente é 404 — a existência não é revelada', async () => {
     const consulta = await agendado(comoA, dados.horarios.amanha, 0);
 
-    const r = await request(servidor).get(`/consultas/${consulta.id}`).set(comoB);
+    const alheia = await request(servidor).get(`/consultas/${consulta.id}`).set(comoB);
+    const inexistente = await request(servidor).get('/consultas/999999').set(comoB);
 
-    expect(r.status).toBe(403);
-    expect(r.body.erro.codigo).toBe('ACESSO_NEGADO');
+    // As duas respostas precisam ser indistinguíveis: é isso que impede
+    // percorrer /consultas/1..N e contar os registros da clínica.
+    expect(alheia.status).toBe(404);
+    expect(alheia.body).toEqual(inexistente.body);
   });
 
   test('id inexistente é 404 e id malformado é 422', async () => {
@@ -419,12 +446,12 @@ describe('PATCH /consultas/:id/cancelamento', () => {
     expect(rows[0].n).toBe(1);
   });
 
-  test('cancelar consulta de outro paciente é 403 e nada muda', async () => {
+  test('cancelar consulta de outro paciente é 404 e nada muda', async () => {
     const consulta = await agendado(comoA, dados.horarios.amanha, 0);
 
     const r = await cancelar(comoB, consulta.id);
 
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(404);
     expect(await horarioNoBanco(dados.horarios.amanha)).toMatchObject({
       status: 'reservado',
       versao: 1,
