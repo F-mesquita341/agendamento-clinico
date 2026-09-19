@@ -1,0 +1,65 @@
+# Infraestrutura da API descrita no repositório.
+#
+# Com este arquivo, publicar de novo — ou repetir o trabalho, que é o que um
+# TCC precisa permitir — não depende de lembrar o que foi clicado num painel.
+#
+# NENHUM SEGREDO AQUI. As variáveis marcadas com `sync: false` não têm valor no
+# repositório: o Render pede cada uma no painel, na criação do serviço.
+#
+# Região: o plano gratuito do Render não oferece região no Brasil. Virginia é a
+# mais próxima do Neon em São Paulo, onde fica o banco; ainda assim, cada ida ao
+# banco custa por volta de 120 ms, contra 56 ms medidos de uma máquina local em
+# Quixadá. É limitação do plano gratuito, e precisa constar do capítulo de
+# resultados: os números de latência da API publicada não são comparáveis aos
+# do teste de concorrência local.
+
+services:
+  - type: web
+    name: agendamento-clinico-api
+    runtime: node
+    plan: free
+    region: virginia
+    branch: main
+    buildCommand: npm ci
+    # As migrations rodam ANTES de abrir a porta. O banco de produção nasce
+    # vazio, e uma publicação com migration pendente não pode subir pela
+    # metade. São idempotentes: a cada reinício, só aplicam o que falta.
+    startCommand: npm run migrate && npm start
+    # O Render consulta esta rota para saber se o serviço está de pé; ela
+    # responde 503 quando o banco não responde.
+    healthCheckPath: /saude
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '24'
+      - key: RESERVA_MINUTOS
+        value: '15'
+      - key: TRANSPORTE_BANCO
+        value: tcp
+      # Restringir à origem do aplicativo é trabalho da Etapa 10; o aplicativo
+      # Android não é um navegador e não passa por CORS.
+      - key: ORIGENS_PERMITIDAS
+        value: '*'
+
+      # --- Preenchidos no painel, nunca aqui --------------------------------
+      # Banco de produção no Neon (agendamento_producao).
+      - key: DATABASE_URL
+        sync: false
+      # Credencial do Firebase Admin, na forma de três variáveis: em hospedagem
+      # não há arquivo de chave.
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      # Mercado Pago, conta de TESTE vendedora — somente sandbox.
+      - key: MERCADO_PAGO_ACCESS_TOKEN
+        sync: false
+      # Chave que assina os avisos; sai do painel do Mercado Pago depois que a
+      # URL pública existir.
+      - key: MERCADO_PAGO_SEGREDO_WEBHOOK
+        sync: false
+      # URL_PUBLICA não entra: o Render define RENDER_EXTERNAL_URL sozinho, e a
+      # configuração usa essa quando URL_PUBLICA não existe.
