@@ -17,7 +17,8 @@
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
     "test:integracao": "jest tests/integration --runInBand",
-    "verificar:token": "node scripts/verificar-token-real.js"
+    "verificar:token": "node scripts/verificar-token-real.js",
+    "carga": "node tests/carga/concorrencia.js"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

@@ -125,6 +125,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm test` | Roda a suíte completa |
 | `npm run test:unit` | Só os testes de unidade, sem banco |
 | `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
+| `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
 
 ## Convenções da API
 
@@ -219,6 +220,40 @@ qualquer paciente autenticado contar os registros da clínica percorrendo ids.
 Na grade, `?de=` e `?ate=` aceitam instante ISO 8601 ou data sem hora
 (`AAAA-MM-DD`), lida como meia-noite **no fuso da clínica**, `America/Fortaleza`.
 Janela com fim anterior ao início responde `JANELA_INVALIDA` (422).
+
+## Teste de concorrência
+
+O critério objetivo do projeto (Seção 4.5) é **zero conflitos** com cem
+requisições simultâneas para o mesmo horário. Para verificar:
+
+```bash
+npm run carga
+```
+
+São três fases de 10 rodadas, cada rodada com cem pacientes diferentes:
+
+| Fase | O que faz | O que prova |
+|---|---|---|
+| A | Cem `POST /consultas` pelo mesmo horário, pela API completa | Não há duplicidade na prática |
+| B | Cem chamadas direto ao adaptador, sem a checagem prévia | As recusas são do `UPDATE` condicional, e não do índice único |
+| C | O horário é reservado e cancelado (versão 2); cem pedidos chegam com a versão 0 | Só a condição de versão recusa — o papel próprio do lock otimista |
+
+A fase B distingue o `UPDATE` do índice pela sequência de ids de `consulta`: toda
+tentativa de `INSERT` consome um número, mesmo quando é desfeita, então uma
+rodada correta avança a sequência em exatamente um.
+
+O relatório fica em `docs/resultados/concorrencia/`, com data, commit, ambiente
+(provedor, isolamento, tempo de uma ida ao banco) e as latências brutas em JSON.
+Com `-- --ensaio`, roda sem gravar relatório; é assim que a integração contínua
+o executa.
+
+Roda sempre contra o banco de teste, que é apagado no início. Os relatórios
+oficiais devem ser gerados com a árvore limpa, para que o commit citado seja
+exatamente o código medido.
+
+**Conflito** é agendamento duplicado — mais de uma consulta ativa no mesmo
+horário. **Recusa** é o `409` de quem perdeu a disputa: 99 por rodada é o
+resultado correto. O HTTP chama o 409 de *Conflict*, mas recusa não é conflito.
 
 ## Autenticação
 

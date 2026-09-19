@@ -32,7 +32,7 @@ const exigeSsl = /sslmode=(require|verify-ca|verify-full)|neon\.tech|render\.com
 
 const opcoes = {
   connectionString: url,
-  max: emTeste ? 5 : 10,
+  max: config.POOL_MAXIMO ?? (emTeste ? 5 : 10),
   idleTimeoutMillis: 30_000,
 
   // O WebSocket precisa de mais folga: além do TCP e do TLS, há o handshake

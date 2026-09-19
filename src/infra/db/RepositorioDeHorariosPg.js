@@ -64,11 +64,31 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
    */
   async reservarEAgendar({ horarioId, versao, pacienteId, reservaExpiraEm }) {
     return transacao(async (cliente) => {
+      // A reserva e a leitura do profissional numa ida só ao banco. Esta
+      // transação segura o bloqueio da linha do horário, e cada ida a menos é
+      // um intervalo a menos em que os concorrentes esperam — ver o relatório
+      // de carga antes e depois da mudança, em docs/resultados/concorrencia.
+      //
+      // O preço é lido AQUI, dentro da transação, e congelado na consulta: ele
+      // é atributo do profissional, e um reajuste amanhã não pode alterar o
+      // valor de uma consulta marcada hoje.
+      //
+      // LEFT JOIN, e não JOIN, de propósito: numa CTE o UPDATE acontece mesmo
+      // que o SELECT de fora não devolva linha nenhuma. Com JOIN interno, um
+      // profissional ausente faria o horário ser reservado e o método devolver
+      // `null`, como se a versão não conferisse. Com LEFT JOIN a linha volta, o
+      // `ativo` vem nulo e cai na recusa logo abaixo, cujo ROLLBACK desfaz a
+      // reserva.
       const reserva = await cliente.query(
-        `UPDATE horario
-            SET status = 'reservado', versao = versao + 1
-          WHERE id = $1 AND versao = $2 AND status = 'disponivel'
-          RETURNING profissional_id, versao, inicio, fim`,
+        `WITH reservado AS (
+           UPDATE horario
+              SET status = 'reservado', versao = versao + 1
+            WHERE id = $1 AND versao = $2 AND status = 'disponivel'
+            RETURNING profissional_id, versao, inicio, fim
+         )
+         SELECT r.versao, r.inicio, r.fim, p.valor_consulta_centavos, p.ativo
+           FROM reservado r
+           LEFT JOIN profissional p ON p.id = r.profissional_id`,
         [horarioId, versao]
       );
 
@@ -77,24 +97,17 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
       }
 
       const {
-        profissional_id: profissionalId,
         versao: versaoNova,
         inicio,
         fim,
+        valor_consulta_centavos: valorCentavos,
+        ativo,
       } = reserva.rows[0];
-
-      // O preço é lido AQUI, dentro da transação, e congelado na consulta: ele
-      // é atributo do profissional, e um reajuste amanhã não pode alterar o
-      // valor de uma consulta marcada hoje.
-      const { rows: profissionais } = await cliente.query(
-        'SELECT valor_consulta_centavos, ativo FROM profissional WHERE id = $1',
-        [profissionalId]
-      );
 
       // Desativar um profissional tira os horários dele das listagens, mas um
       // aplicativo com a tela antiga aberta ainda tentaria agendar. O ROLLBACK
       // desfaz a reserva feita acima.
-      if (!profissionais[0]?.ativo) {
+      if (!ativo) {
         throw new RegraDeNegocio(
           'PROFISSIONAL_INDISPONIVEL',
           'Este profissional não está mais atendendo. Escolha outro horário.'
@@ -111,7 +124,7 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
           [
             pacienteId,
             horarioId,
-            profissionais[0].valor_consulta_centavos,
+            valorCentavos,
             reservaExpiraEm,
             // O período é copiado do horário reservado logo acima, e congela a
             // duração combinada junto com o preço.

@@ -27,7 +27,13 @@ const { criarRotasDeConsultas } = require('./rotas/consultas');
 const { criarVerificadorFirebase } = require('../../infra/firebase/verificadorDeToken');
 const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
 
-function criarApp({ verificarToken = criarVerificadorFirebase(), pacientes, relogio } = {}) {
+function criarApp({
+  verificarToken = criarVerificadorFirebase(),
+  pacientes,
+  horarios,
+  consultas,
+  relogio,
+} = {}) {
   const app = express();
 
   app.disable('x-powered-by');
@@ -39,7 +45,13 @@ function criarApp({ verificarToken = criarVerificadorFirebase(), pacientes, relo
   app.use('/especialidades', especialidades);
   app.use('/profissionais', profissionais);
   app.use('/pacientes', criarRotasDePacientes({ verificarToken, pacientes, relogio }));
-  app.use('/consultas', criarRotasDeConsultas({ verificarToken, pacientes, relogio }));
+  // `horarios` e `consultas` só são informados pelo teste de carga, que mede
+  // quantas recusas foram decididas pelo lock; ausentes, a rota usa os
+  // adaptadores PostgreSQL de sempre.
+  app.use(
+    '/consultas',
+    criarRotasDeConsultas({ verificarToken, pacientes, horarios, consultas, relogio })
+  );
 
   app.use(rotaNaoEncontrada);
   app.use(tratadorDeErro);

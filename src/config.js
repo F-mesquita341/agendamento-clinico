@@ -32,6 +32,15 @@ const esquema = z.object({
   // Ver src/infra/db/driver.js.
   TRANSPORTE_BANCO: z.enum(['tcp', 'websocket']).default('tcp'),
 
+  // Conexões simultâneas com o banco. Sem esta variável: 5 em teste, 10 fora.
+  // O teste de carga usa 10, para medir com a mesma concorrência de produção.
+  POOL_MAXIMO: z.coerce
+    .number({ invalid_type_error: 'precisa ser um número' })
+    .int('precisa ser um número inteiro')
+    .positive('precisa ser maior que zero')
+    .max(50, 'no máximo 50 — o plano gratuito do Neon limita as conexões')
+    .optional(),
+
   // Credencial do Firebase Admin, em uma de duas formas:
   //   arquivo — GOOGLE_APPLICATION_CREDENTIALS com o CAMINHO do JSON da conta
   //             de serviço. Usada no desenvolvimento: a chave fica no arquivo,
