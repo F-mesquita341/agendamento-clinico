@@ -221,6 +221,42 @@ Na grade, `?de=` e `?ate=` aceitam instante ISO 8601 ou data sem hora
 (`AAAA-MM-DD`), lida como meia-noite **no fuso da clínica**, `America/Fortaleza`.
 Janela com fim anterior ao início responde `JANELA_INVALIDA` (422).
 
+## Pagamento (sandbox)
+
+O pagamento é **simulado** pelo Mercado Pago em sandbox, com Checkout Pro: o
+paciente paga numa página do Mercado Pago, e nenhum dado de cartão passa pela
+API nem pelo aplicativo.
+
+| Rota | Acesso | O que faz |
+|---|---|---|
+| `POST /consultas/:id/pagamento` | token + dono | Abre o checkout — ou devolve o que já está aberto |
+| `POST /webhooks/mercadopago` | pública, assinada | Recebe o aviso de que um pagamento mudou |
+
+1. O app pede o pagamento e recebe `checkoutUrl`, com o mesmo prazo da reserva.
+2. O paciente paga na página do Mercado Pago.
+3. O Mercado Pago avisa a API pelo webhook. A API **confere a assinatura**, busca
+   o pagamento **no próprio Mercado Pago** — o conteúdo do aviso não é usado —,
+   confere valor, moeda e modo sandbox, e confirma a consulta.
+4. O app acompanha por `GET /consultas/:id` até ver `confirmada`. O retorno da
+   página de pagamento não confirma nada.
+
+Reservas não pagas expiram: uma rotina, a cada minuto, cancela a consulta
+vencida com `motivoCancelamento: "reserva_expirada"`, devolve o horário à grade e
+encerra o checkout. Antes, ela pergunta ao Mercado Pago se houve pagamento cujo
+aviso se perdeu — e, se houve, confirma em vez de expirar.
+
+Travas de sandbox: o banco recusa pagamento fora do sandbox, e o webhook ignora
+pagamento em modo real, registrando-o como anomalia. O que vai ao Mercado Pago
+é o mínimo — o item "Consulta médica", o valor, uma referência aleatória e o
+prazo; nada do paciente.
+
+| Código | Quando |
+|---|---|
+| `CONSULTA_NAO_PAGAVEL` (422) | A consulta já está paga ou foi cancelada |
+| `RESERVA_EXPIRADA` (422) | O prazo para pagar terminou |
+| `PAGAMENTO_INDISPONIVEL` (503, `tentar_novamente`) | O Mercado Pago não respondeu, ou não está configurado |
+| `ASSINATURA_INVALIDA` (401) | Aviso sem assinatura válida no webhook |
+
 ## Teste de concorrência
 
 O critério objetivo do projeto (Seção 4.5) é **zero conflitos** com cem

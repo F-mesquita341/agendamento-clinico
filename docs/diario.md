@@ -877,3 +877,80 @@ texto deve dizer isso nessa ordem.
 **268 testes passando.**
 
 ---
+
+## 19/09/2026 — Etapa 8, parte A: pagamento, webhook e expiração
+
+A parte que não depende de contas externas: o ciclo da consulta fecha. Ela
+nasce aguardando pagamento, o paciente abre o checkout, o Mercado Pago avisa, a
+consulta é confirmada — ou a reserva vence e o horário volta à grade. O
+Mercado Pago é um dublê nos testes; a integração de verdade é a parte B.
+
+**Decisões principais.**
+
+- *Checkout Pro*, não formulário de cartão no app: nenhum dado de cartão passa
+  pela API.
+- *Só o webhook confirma, e nunca pelo conteúdo do aviso.* A notificação diz "o
+  pagamento X mudou"; a API busca X no próprio Mercado Pago e confere valor,
+  moeda e modo sandbox antes de confirmar.
+- *Assinatura antes de tudo*, HMAC SHA-256 com comparação em tempo constante.
+  **Desvio do plano:** não há recusa por instante antigo. Como o estado é sempre
+  buscado no provedor, reproduzir um aviso legítimo é inofensivo; e se o
+  Mercado Pago reenviar mantendo o instante original, uma tolerância recusaria
+  justamente os reenvios de que a API depende quando hiberna.
+- *LGPD:* ao provedor vão o item "Consulta médica", o valor, uma referência
+  aleatória e o prazo. Nada do paciente — verificado por teste que inspeciona o
+  corpo enviado.
+- *O checkout expira junto com a reserva*, e pedir de novo devolve o mesmo:
+  dois checkouts abertos permitiriam pagar duas vezes. O banco garante um só
+  aberto por consulta.
+- *Motivo do cancelamento* passa a ser gravado — `paciente` ou
+  `reserva_expirada` —, e o banco exige motivo em toda consulta cancelada.
+  Para a análise de absenteísmo, desistir e abandonar o checkout são coisas
+  diferentes.
+- *Reconciliação antes de expirar:* no plano gratuito do Render a API hiberna e
+  o aviso pode se perder; a rotina pergunta ao Mercado Pago antes de cancelar a
+  consulta de quem talvez tenha pago.
+- **Acrescentado durante a implementação:** um limite para o adiamento. Se o
+  provedor estiver fora do ar, a expiração é adiada — mas, passados 30 minutos
+  do vencimento, a reserva expira assim mesmo. Sem isso, uma queda longa do
+  Mercado Pago prenderia horários indefinidamente.
+- *Pagamento aprovado depois da expiração* não ressuscita a consulta — o
+  horário pode ser de outra pessoa: vira anomalia registrada, para estorno.
+- As duas pendências herdadas da Etapa 6 resolvidas: `liberar` passou a exigir o
+  cliente de uma transação, e o desligamento trata a falha ao fechar o banco e
+  tem prazo.
+
+**Mais um teste verde que não provava nada — o sexto do trabalho, e o primeiro
+previsto.** O teste que dispara webhook e expiração ao mesmo tempo passou seis
+vezes seguidas com o `FOR UPDATE` removido: a ordem perigosa depende do acaso.
+Foi substituído por um teste que **força** a ordem — abre a expiração pela
+metade, lança o webhook, espera o próprio banco mostrar uma sessão aguardando
+bloqueio (em `pg_stat_activity`) e só então confirma. Com o defeito, falha três
+de três; sem ele, passa. O mesmo desenho, invertido, prova que a expiração não
+cancela uma consulta paga no meio do caminho.
+
+**Uma segunda rede, que ninguém planejou.** Com o bloqueio removido, quem
+impediu a confirmação por cima do cancelamento foi a restrição criada para o
+motivo de cancelamento: a consulta cancelada carregava `reserva_expirada`, e o
+banco recusou deixá-la "confirmada" com esse motivo. O estado ficaria coerente
+mesmo sem o bloqueio — mas por um erro 500 e um reenvio do Mercado Pago, e não
+por projeto. O bloqueio continua sendo o mecanismo; a restrição, a rede.
+
+**Um teste que falhava por acaso, escrito por mim.** Verificava que a
+referência aleatória "não continha" o id da consulta — que vale 1 logo depois da
+limpeza do banco, e um UUID contém o dígito 1 em cerca de 87% das vezes. Falhou
+de forma intermitente durante a reintrodução de defeitos, e só por isso foi
+notado. Passou a verificar o que importa: que a referência é um UUID aleatório.
+
+Defeitos reintroduzidos, todos acusados: verificação de assinatura desligada,
+conferência de valor desligada, pagamento em modo real aceito, bloqueio da
+consulta removido no webhook, expiração sem reler o estado.
+
+**370 testes passando**; teste de carga ainda 30 de 30 nas três fases.
+
+**Pendente para a parte B**, que depende das contas: a terceira trava de
+sandbox (recusar subir com credencial de conta real, se a API do Mercado Pago
+permitir distinguir), e a validação da assinatura contra uma notificação real,
+que substitui a documentação que não pôde ser lida.
+
+---
