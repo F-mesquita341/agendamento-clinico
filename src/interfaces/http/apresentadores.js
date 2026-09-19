@@ -75,6 +75,9 @@ function consulta(c, { horario: h, profissional: p } = {}) {
   return {
     id: c.id,
     status: c.status,
+    // Só em consulta cancelada: 'paciente' ou 'reserva_expirada'. O aplicativo
+    // usa para explicar o que houve — "você cancelou" não é "o prazo acabou".
+    motivoCancelamento: c.motivoCancelamento ?? null,
     horarioId: c.horarioId,
     valorCentavos: c.valor.centavos,
     valorFormatado: c.valor.formatar(),
@@ -85,4 +88,21 @@ function consulta(c, { horario: h, profissional: p } = {}) {
   };
 }
 
-module.exports = { especialidade, profissional, horario, paciente, consulta };
+/**
+ * Checkout aberto de uma consulta.
+ *
+ * O prazo é o da reserva: depois dele o checkout expira no provedor e o horário
+ * volta à grade. O aplicativo abre `checkoutUrl` e, na volta, acompanha a
+ * confirmação por GET /consultas/:id — o retorno do checkout não confirma nada.
+ */
+function checkout(ch, c) {
+  return {
+    status: ch.status,
+    checkoutUrl: ch.checkoutUrl,
+    expiraEm: c.reservaExpiraEm ? c.reservaExpiraEm.toISOString() : null,
+    valorCentavos: c.valor.centavos,
+    valorFormatado: c.valor.formatar(),
+  };
+}
+
+module.exports = { especialidade, profissional, horario, paciente, consulta, checkout };

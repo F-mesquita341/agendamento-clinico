@@ -48,6 +48,10 @@ function carregarConfig(variaveis) {
     'DATABASE_URL_TESTE',
     'TRANSPORTE_BANCO',
     'POOL_MAXIMO',
+    'MERCADO_PAGO_ACCESS_TOKEN',
+    'MERCADO_PAGO_SEGREDO_WEBHOOK',
+    'URL_PUBLICA',
+    'RENDER_EXTERNAL_URL',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'FIREBASE_PROJECT_ID',
     'FIREBASE_CLIENT_EMAIL',
@@ -190,6 +194,14 @@ describe('credencial do Firebase', () => {
     FIREBASE_PRIVATE_KEY: 'chave-de-exemplo-nao-real',
   };
 
+  // Desde a Etapa 8, produção também exige o pagamento configurado. Os
+  // cenários que testam o Firebase em produção levam estas junto.
+  const PAGAMENTO = {
+    MERCADO_PAGO_ACCESS_TOKEN: 'credencial-de-exemplo-nao-real',
+    MERCADO_PAGO_SEGREDO_WEBHOOK: 'segredo-de-exemplo',
+    URL_PUBLICA: 'https://api.exemplo.onrender.com',
+  };
+
   test('em produção, sem credencial nenhuma, a API não sobe', () => {
     const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO });
 
@@ -198,7 +210,7 @@ describe('credencial do Firebase', () => {
   });
 
   test('em produção, com as três variáveis FIREBASE_*, sobe', () => {
-    const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS });
+    const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS, ...PAGAMENTO });
 
     expect(r.codigo).toBe(0);
   });
@@ -210,6 +222,7 @@ describe('credencial do Firebase', () => {
       NODE_ENV: 'production',
       DATABASE_URL: DIRETO,
       GOOGLE_APPLICATION_CREDENTIALS: arquivo,
+      ...PAGAMENTO,
     });
 
     expect(r.codigo).toBe(0);
@@ -289,11 +302,50 @@ describe('credencial do Firebase', () => {
       NODE_ENV: 'production',
       DATABASE_URL: DIRETO,
       ...CAMPOS,
+      ...PAGAMENTO,
       GOOGLE_APPLICATION_CREDENTIALS: path.join(pastaSemEnv, 'removido-ha-tempos.json'),
     });
 
     expect(r.codigo).toBe(0);
     expect(r.saida).toMatch(/ignorada/);
+  });
+
+  describe('pagamento em produção', () => {
+    const base = { NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS };
+
+    test('sem nada do Mercado Pago, a API não sobe e diz o que falta', () => {
+      const r = carregarConfig(base);
+
+      expect(r.codigo).toBe(1);
+      expect(r.saida).toMatch(/MERCADO_PAGO_ACCESS_TOKEN/);
+      expect(r.saida).toMatch(/MERCADO_PAGO_SEGREDO_WEBHOOK/);
+      expect(r.saida).toMatch(/URL_PUBLICA/);
+    });
+
+    test('a URL pública pode vir de RENDER_EXTERNAL_URL, definida pela plataforma', () => {
+      const { URL_PUBLICA, ...semUrl } = PAGAMENTO;
+      const r = carregarConfig({ ...base, ...semUrl, RENDER_EXTERNAL_URL: 'https://api.onrender.com' });
+
+      expect(r.codigo).toBe(0);
+    });
+
+    test('URL pública sem protocolo é recusada', () => {
+      const r = carregarConfig({ ...base, ...PAGAMENTO, URL_PUBLICA: 'api.exemplo.com' });
+
+      expect(r.codigo).toBe(1);
+      expect(r.saida).toMatch(/URL_PUBLICA: precisa ser uma URL completa/);
+    });
+
+    test('a mensagem de erro nunca ecoa a credencial', () => {
+      const r = carregarConfig({ ...base, MERCADO_PAGO_ACCESS_TOKEN: 'credencial-que-nao-pode-aparecer' });
+
+      expect(r.codigo).toBe(1);
+      expect(r.saida).not.toMatch(/credencial-que-nao-pode-aparecer/);
+    });
+
+    test('fora de produção, o pagamento é opcional', () => {
+      expect(carregarConfig({ NODE_ENV: 'development', DATABASE_URL: DIRETO }).codigo).toBe(0);
+    });
   });
 
   test('variáveis FIREBASE_* incompletas são recusadas', () => {

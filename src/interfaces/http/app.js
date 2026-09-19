@@ -24,14 +24,26 @@ const especialidades = require('./rotas/especialidades');
 const profissionais = require('./rotas/profissionais');
 const { criarRotasDePacientes } = require('./rotas/pacientes');
 const { criarRotasDeConsultas } = require('./rotas/consultas');
+const { criarRotasDeWebhook } = require('./rotas/webhooks');
 const { criarVerificadorFirebase } = require('../../infra/firebase/verificadorDeToken');
+const { criarGatewayDePagamento } = require('../../infra/pagamento');
 const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
 
+/**
+ * @param {object} [deps]
+ * @param {Function} [deps.verificarToken] verificador do Firebase; falso nos testes
+ * @param {object} [deps.gateway] provedor de pagamento; nos testes, um dublê sem
+ *        rede. Sem credencial configurada, o padrão responde "indisponível".
+ * @param {string} [deps.segredoDoWebhook] chave que assina os avisos do provedor
+ */
 function criarApp({
   verificarToken = criarVerificadorFirebase(),
+  gateway = criarGatewayDePagamento(),
+  segredoDoWebhook = config.MERCADO_PAGO_SEGREDO_WEBHOOK,
   pacientes,
   horarios,
   consultas,
+  pagamentos,
   relogio,
 } = {}) {
   const app = express();
@@ -50,8 +62,9 @@ function criarApp({
   // adaptadores PostgreSQL de sempre.
   app.use(
     '/consultas',
-    criarRotasDeConsultas({ verificarToken, pacientes, horarios, consultas, relogio })
+    criarRotasDeConsultas({ verificarToken, gateway, pacientes, horarios, consultas, pagamentos, relogio })
   );
+  app.use('/webhooks', criarRotasDeWebhook({ gateway, segredo: segredoDoWebhook, pagamentos }));
 
   app.use(rotaNaoEncontrada);
   app.use(tratadorDeErro);

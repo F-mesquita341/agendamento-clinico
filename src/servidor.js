@@ -5,13 +5,21 @@
  *
  * É aqui, e só aqui, que as dependências de produção são escolhidas e montadas.
  * Os testes não passam por este arquivo: montam o app com `criarApp` e um
- * verificador de token falso.
+ * verificador de token falso, e nunca ligam rotinas periódicas.
  */
 
 const config = require('./config');
 const { criarApp } = require('./interfaces/http/app');
 const { criarVerificadorFirebase } = require('./infra/firebase/verificadorDeToken');
+const { criarGatewayDePagamento } = require('./infra/pagamento');
+const { RepositorioDeConsultasPg } = require('./infra/db/RepositorioDeConsultasPg');
+const { RepositorioDePagamentosPg } = require('./infra/db/RepositorioDePagamentosPg');
+const { ExpirarReservasVencidas } = require('./application/ExpirarReservasVencidas');
+const { agendar } = require('./infra/agendador');
 const { encerrar, transporte } = require('./infra/db/pool');
+
+const INTERVALO_DA_EXPIRACAO_MS = 60_000;
+const PRAZO_DO_DESLIGAMENTO_MS = 10_000;
 
 const verificarToken = criarVerificadorFirebase();
 
@@ -32,7 +40,12 @@ if (config.credencialFirebase) {
   );
 }
 
-const app = criarApp({ verificarToken });
+const gateway = criarGatewayDePagamento();
+if (!config.MERCADO_PAGO_ACCESS_TOKEN) {
+  console.warn('Aviso: Mercado Pago não configurado. POST /consultas/:id/pagamento vai responder 503.');
+}
+
+const app = criarApp({ verificarToken, gateway });
 
 const servidor = app.listen(config.PORTA, () => {
   console.log(
@@ -54,14 +67,66 @@ servidor.on('error', (erro) => {
   throw erro;
 });
 
-// O Render envia SIGTERM antes de derrubar o contêiner. Fechar o pool evita
-// conexões penduradas no Neon, que tem limite no tier gratuito.
-for (const sinal of ['SIGTERM', 'SIGINT']) {
-  process.on(sinal, () => {
-    console.log(`\n${sinal} recebido, encerrando...`);
-    servidor.close(async () => {
+// Reservas não pagas voltam à grade. Só roda enquanto a API está de pé — no
+// plano gratuito do Render ela hiberna, e por isso a rotina também roda logo
+// na subida.
+const expirar = new ExpirarReservasVencidas({
+  consultas: new RepositorioDeConsultasPg(),
+  pagamentos: new RepositorioDePagamentosPg(),
+  gateway,
+});
+const rotinaDeExpiracao = agendar(() => expirar.executar(), INTERVALO_DA_EXPIRACAO_MS, {
+  nome: 'expiração de reservas',
+  aoTerminar: ({ expiradas, confirmadas, adiadas, falhas }) => {
+    if (expiradas || confirmadas || adiadas || falhas) {
+      console.log(
+        `Expiração de reservas: ${expiradas} expirada(s), ${confirmadas} confirmada(s) ` +
+          `na reconciliação, ${adiadas} adiada(s), ${falhas} falha(s).`
+      );
+    }
+  },
+});
+
+/**
+ * Desligamento: o Render manda SIGTERM a cada publicação.
+ *
+ * Para a rotina, deixa as requisições em andamento terminarem, fecha o pool e
+ * sai. Duas proteções que faltavam: o erro ao fechar o pool é tratado — antes
+ * virava rejeição não tratada, e um encerramento normal aparecia como falha —,
+ * e há prazo — uma conexão presa impedia o `close` de terminar, e o processo
+ * acabava morto à força.
+ */
+let desligando = false;
+
+function desligar(sinal) {
+  if (desligando) return;
+  desligando = true;
+  console.log(`\n${sinal} recebido, encerrando...`);
+
+  rotinaDeExpiracao.parar();
+
+  const prazo = setTimeout(() => {
+    console.error(`Encerramento passou de ${PRAZO_DO_DESLIGAMENTO_MS / 1000} s; saindo à força.`);
+    process.exit(1);
+  }, PRAZO_DO_DESLIGAMENTO_MS);
+  prazo.unref();
+
+  servidor.close(async () => {
+    try {
       await encerrar();
-      process.exit(0);
-    });
+      process.exitCode = 0;
+    } catch (erro) {
+      console.error('Falha ao fechar as conexões com o banco:', erro.message);
+      process.exitCode = 1;
+    } finally {
+      clearTimeout(prazo);
+      process.exit();
+    }
   });
+  // Conexões keep-alive ociosas não impedem mais o fechamento.
+  servidor.closeIdleConnections();
+}
+
+for (const sinal of ['SIGTERM', 'SIGINT']) {
+  process.on(sinal, () => desligar(sinal));
 }

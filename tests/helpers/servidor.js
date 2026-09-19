@@ -27,9 +27,15 @@ const { verificadorFalso } = require('./verificadorFalso');
  * de rede ou credencial do Firebase — a integração contínua não tem nenhuma
  * das duas.
  */
-async function iniciar({ verificarToken = verificadorFalso, relogio } = {}) {
-  // Porta 0: o sistema operacional escolhe uma livre.
-  const servidor = criarApp({ verificarToken, relogio }).listen(0);
+async function iniciar({ verificarToken = verificadorFalso, relogio, gateway, segredoDoWebhook } = {}) {
+  // Porta 0: o sistema operacional escolhe uma livre. Sem `gateway`, o app usa
+  // o padrão — sem credencial no ambiente de teste, um gateway "indisponível".
+  const servidor = criarApp({
+    verificarToken,
+    relogio,
+    ...(gateway ? { gateway } : {}),
+    ...(segredoDoWebhook ? { segredoDoWebhook } : {}),
+  }).listen(0);
 
   // O plano gratuito do Neon suspende o compute quando fica ocioso. A primeira
   // consulta depois disso leva vários segundos para acordá-lo, o que estourava

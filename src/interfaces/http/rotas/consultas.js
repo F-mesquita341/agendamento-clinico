@@ -7,6 +7,7 @@
  *   GET   /consultas                    lista as do paciente autenticado
  *   GET   /consultas/:id                detalhe de uma consulta própria
  *   PATCH /consultas/:id/cancelamento   cancela e devolve o horário à grade
+ *   POST  /consultas/:id/pagamento      abre (ou reaproveita) o checkout
  *
  * O paciente vem sempre do token, via `carregarPaciente` — nenhuma rota aceita
  * id de paciente. Um id de CONSULTA na URL é inevitável, e por isso o dono é
@@ -23,6 +24,8 @@ const { z } = require('zod');
 const config = require('../../../config');
 const { AgendarConsulta } = require('../../../application/AgendarConsulta');
 const { CancelarConsulta } = require('../../../application/CancelarConsulta');
+const { IniciarPagamento } = require('../../../application/IniciarPagamento');
+const { RepositorioDePagamentosPg } = require('../../../infra/db/RepositorioDePagamentosPg');
 const { RepositorioDeHorariosPg } = require('../../../infra/db/RepositorioDeHorariosPg');
 const { RepositorioDeConsultasPg } = require('../../../infra/db/RepositorioDeConsultasPg');
 const { RepositorioDePacientesPg } = require('../../../infra/db/RepositorioDePacientesPg');
@@ -81,22 +84,26 @@ function semRevelarExistencia(erro) {
 
 function criarRotasDeConsultas({
   verificarToken,
+  gateway,
   pacientes = new RepositorioDePacientesPg(),
   horarios = new RepositorioDeHorariosPg(),
   consultas = new RepositorioDeConsultasPg(),
+  pagamentos = new RepositorioDePagamentosPg(),
   relogio,
 }) {
   const rotas = Router();
   const autenticar = criarAutenticar(verificarToken);
   const carregarPaciente = criarCarregarPaciente(pacientes);
+  const comRelogio = relogio ? { relogio } : {};
 
   const agendar = new AgendarConsulta({
     horarios,
     consultas,
     reservaMinutos: config.RESERVA_MINUTOS,
-    ...(relogio ? { relogio } : {}),
+    ...comRelogio,
   });
   const cancelar = new CancelarConsulta({ consultas });
+  const iniciarPagamento = new IniciarPagamento({ consultas, pagamentos, gateway, ...comRelogio });
 
   // Consulta marcada é dado de saúde: não pode ficar em cache de proxy nem do
   // navegador.
@@ -177,6 +184,22 @@ function criarRotasDeConsultas({
       });
 
       res.json({ consulta: apresentar.consulta(consulta) });
+    } catch (erro) {
+      next(semRevelarExistencia(erro));
+    }
+  });
+
+  rotas.post('/:id/pagamento', async (req, res, next) => {
+    try {
+      const { id } = validar(idNaRota, req.params);
+
+      const { checkout, consulta, novo } = await iniciarPagamento.executar({
+        pacienteId: req.paciente.id,
+        consultaId: id,
+      });
+
+      // 201 quando o checkout nasceu agora; 200 quando é o mesmo de antes.
+      res.status(novo ? 201 : 200).json({ pagamento: apresentar.checkout(checkout, consulta) });
     } catch (erro) {
       next(semRevelarExistencia(erro));
     }

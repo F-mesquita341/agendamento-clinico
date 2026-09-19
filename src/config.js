@@ -51,6 +51,18 @@ const esquema = z.object({
   FIREBASE_PROJECT_ID: z.string().min(1).optional(),
   FIREBASE_CLIENT_EMAIL: z.string().min(1).optional(),
   FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
+
+  // Mercado Pago, só em sandbox: credencial da CONTA DE TESTE vendedora, e a
+  // chave secreta que assina os webhooks. Fora de produção são opcionais — sem
+  // elas, a rota de pagamento responde 503 e o webhook recusa tudo.
+  MERCADO_PAGO_ACCESS_TOKEN: z.string().min(1).optional(),
+  MERCADO_PAGO_SEGREDO_WEBHOOK: z.string().min(1).optional(),
+
+  // Endereço público da API, para o Mercado Pago saber aonde mandar o aviso de
+  // pagamento. No Render, RENDER_EXTERNAL_URL é definida pela própria
+  // plataforma; URL_PUBLICA, se existir, tem prioridade.
+  URL_PUBLICA: z.string().url('precisa ser uma URL completa, com https://').optional(),
+  RENDER_EXTERNAL_URL: z.string().url().optional(),
 });
 
 // Variável definida com valor vazio (`CHAVE=`) conta como não definida. É o
@@ -220,6 +232,25 @@ if (config.NODE_ENV === 'production' && !config.credencialFirebase) {
     'Em produção a credencial do Firebase é obrigatória. Defina as três\n' +
       'variáveis FIREBASE_* ou GOOGLE_APPLICATION_CREDENTIALS.'
   );
+}
+
+config.urlPublica = (config.URL_PUBLICA ?? config.RENDER_EXTERNAL_URL ?? '').replace(/\/+$/, '') || null;
+
+// Em produção, pagamento é parte do fluxo principal: sem credencial, toda
+// consulta ficaria presa em "aguardando pagamento" até expirar. Sem URL
+// pública, o Mercado Pago não teria para onde avisar.
+if (config.NODE_ENV === 'production') {
+  const faltando = [
+    ['MERCADO_PAGO_ACCESS_TOKEN', config.MERCADO_PAGO_ACCESS_TOKEN],
+    ['MERCADO_PAGO_SEGREDO_WEBHOOK', config.MERCADO_PAGO_SEGREDO_WEBHOOK],
+    ['URL_PUBLICA (ou RENDER_EXTERNAL_URL)', config.urlPublica],
+  ]
+    .filter(([, valor]) => !valor)
+    .map(([nome]) => nome);
+
+  if (faltando.length > 0) {
+    abortar(`Em produção o pagamento precisa estar configurado. Faltando: ${faltando.join(', ')}.`);
+  }
 }
 
 config.origens =
