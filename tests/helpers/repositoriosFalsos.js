@@ -21,7 +21,7 @@
  * existente apenas neste arquivo.
  */
 
-const { Consulta, STATUS_CONSULTA } = require('../../src/domain/Consulta');
+const { Consulta, STATUS_CONSULTA, MOTIVO_CANCELAMENTO } = require('../../src/domain/Consulta');
 const { Horario, STATUS_HORARIO } = require('../../src/domain/Horario');
 const { Dinheiro } = require('../../src/domain/Dinheiro');
 const { Paciente } = require('../../src/domain/Paciente');
@@ -187,10 +187,33 @@ class ConsultasFalsas extends RepositorioDeConsultas {
       throw new NaoEncontrado('Consulta');
     }
     consulta.garantirQuePodeSerCancelada();
-    consulta.status = STATUS_CONSULTA.CANCELADA;
-    const h = this.horarioDaConsulta.get(String(consultaId));
-    if (h) await this.horarios.liberar(h.id);
+    await this.cancelarComMotivo(consulta, MOTIVO_CANCELAMENTO.PACIENTE);
     return consulta;
+  }
+
+  async reservasVencidas(agora, limite) {
+    // O dublê não conhece checkouts: nenhuma referência para reconciliar.
+    return [...this.itens.values()]
+      .filter((c) => c.expirouAguardandoPagamento(agora))
+      .sort((a, b) => a.reservaExpiraEm - b.reservaExpiraEm)
+      .slice(0, limite)
+      .map((c) => ({ consultaId: c.id, reservaExpiraEm: c.reservaExpiraEm, referencias: [] }));
+  }
+
+  async expirarSeVencida(consultaId, agora) {
+    const consulta = this.itens.get(String(consultaId));
+    // Mesma condição que o adaptador reavalia sob bloqueio.
+    if (!consulta || !consulta.expirouAguardandoPagamento(agora)) return false;
+    await this.cancelarComMotivo(consulta, MOTIVO_CANCELAMENTO.RESERVA_EXPIRADA);
+    return true;
+  }
+
+  /** O banco exige motivo em toda consulta cancelada; o dublê também. */
+  async cancelarComMotivo(consulta, motivo) {
+    consulta.status = STATUS_CONSULTA.CANCELADA;
+    consulta.motivoCancelamento = motivo;
+    const h = this.horarioDaConsulta.get(String(consulta.id));
+    if (h) await this.horarios.liberar(h.id, 'transação em memória');
   }
 }
 

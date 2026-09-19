@@ -11,7 +11,7 @@
 const { RepositorioDeHorarios } = require('../../domain/repositorios');
 const { Horario } = require('../../domain/Horario');
 const { RegraDeNegocio, ConsultaSobreposta } = require('../../domain/erros');
-const { pool, consultar, transacao } = require('./pool');
+const { consultar, transacao } = require('./pool');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 
 const COLUNAS = 'id, profissional_id, inicio, fim, status, versao';
@@ -169,18 +169,22 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
   /**
    * Devolve o horário à grade, incrementando a versão.
    *
-   * Aceita um `executor` para rodar dentro de uma transação já aberta — é assim
-   * que o cancelamento libera o horário junto com a mudança de estado da
-   * consulta. Sem argumento, usa o pool: é como a rotina de expiração de
-   * reservas não pagas vai chamá-lo.
+   * Exige o cliente de uma transação já aberta: o cancelamento e a expiração
+   * liberam o horário junto com a mudança de estado da consulta e a auditoria.
+   * Até a Etapa 8 havia um executor padrão — o pool —, reservado para a rotina
+   * de expiração; a rotina acabou precisando da transação, e o caminho sem ela
+   * foi removido para não ser usado por engano.
    *
    * Só libera horário `reservado`: um horário que a clínica bloqueou continua
    * bloqueado mesmo que uma consulta antiga seja cancelada.
    *
    * @returns {Promise<boolean>} se o horário voltou para a grade.
    */
-  async liberar(horarioId, executor = pool) {
-    const { rowCount } = await executor.query(
+  async liberar(horarioId, cliente) {
+    if (!cliente) {
+      throw new Error('liberar exige o cliente de uma transação aberta.');
+    }
+    const { rowCount } = await cliente.query(
       `UPDATE horario
           SET status = 'disponivel', versao = versao + 1
         WHERE id = $1 AND status = 'reservado'`,

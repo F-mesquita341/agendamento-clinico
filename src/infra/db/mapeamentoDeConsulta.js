@@ -14,7 +14,7 @@ const { Consulta } = require('../../domain/Consulta');
 
 const COLUNAS_DA_CONSULTA = `
   id, paciente_id, horario_id, status, valor_centavos,
-  reserva_expira_em, lembrete_enviado_em, criado_em
+  reserva_expira_em, lembrete_enviado_em, criado_em, motivo_cancelamento
 `;
 
 function paraConsulta(linha) {
@@ -28,6 +28,7 @@ function paraConsulta(linha) {
     reservaExpiraEm: linha.reserva_expira_em,
     lembreteEnviadoEm: linha.lembrete_enviado_em,
     criadoEm: linha.criado_em,
+    motivoCancelamento: linha.motivo_cancelamento ?? null,
   });
 }
 

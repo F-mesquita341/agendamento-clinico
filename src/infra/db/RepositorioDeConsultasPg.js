@@ -13,6 +13,7 @@
 
 const { RepositorioDeConsultas } = require('../../domain/repositorios');
 const { NaoEncontrado } = require('../../domain/erros');
+const { MOTIVO_CANCELAMENTO } = require('../../domain/Consulta');
 const { consultar, transacao } = require('./pool');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 const { RepositorioDeHorariosPg, paraHorario } = require('./RepositorioDeHorariosPg');
@@ -27,7 +28,7 @@ const { paraProfissional } = require('./RepositorioDeProfissionaisPg');
  */
 const COLUNAS_DA_LEITURA = `
   c.id, c.paciente_id, c.horario_id, c.status, c.valor_centavos,
-  c.reserva_expira_em, c.lembrete_enviado_em, c.criado_em,
+  c.reserva_expira_em, c.lembrete_enviado_em, c.criado_em, c.motivo_cancelamento,
 
   h.id AS h_id, h.profissional_id AS h_profissional_id,
   h.inicio AS h_inicio, h.fim AS h_fim,
@@ -146,46 +147,123 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
    */
   async cancelar(consultaId) {
     return transacao(async (cliente) => {
-      const { rows } = await cliente.query(
-        `SELECT ${COLUNAS_DA_CONSULTA} FROM consulta WHERE id = $1 FOR UPDATE`,
-        [consultaId]
-      );
-      if (rows.length === 0) {
+      const consulta = await lerSobBloqueio(cliente, consultaId);
+      if (!consulta) {
         throw new NaoEncontrado('Consulta');
       }
 
-      const consulta = paraConsulta(rows[0]);
       // Relido sob bloqueio: entre a verificação do caso de uso e este ponto o
       // estado pode ter mudado. Quem decide continua sendo o domínio.
       consulta.garantirQuePodeSerCancelada();
 
-      const { rows: canceladas } = await cliente.query(
-        `UPDATE consulta
-            SET status = 'cancelada', atualizado_em = now()
-          WHERE id = $1
-          RETURNING ${COLUNAS_DA_CONSULTA}`,
-        [consultaId]
-      );
-
-      const liberado = await horarios.liberar(consulta.horarioId, cliente);
-      if (!liberado) {
-        // Consulta ativa cujo horário não estava reservado: inconsistência que
-        // não impede o cancelamento, mas precisa aparecer no log.
-        console.warn(
-          `Consulta ${consultaId} cancelada, mas o horário ${consulta.horarioId} ` +
-            'não estava reservado.'
-        );
-      }
-
-      await cliente.query(
-        `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
-         VALUES ('paciente', $1, 'consulta.cancelada', 'consulta', $2, $3)`,
-        [consulta.pacienteId, consultaId, { horarioId: consulta.horarioId, horarioLiberado: liberado }]
-      );
-
-      return paraConsulta(canceladas[0]);
+      return cancelarSobBloqueio(cliente, consulta, {
+        motivo: MOTIVO_CANCELAMENTO.PACIENTE,
+        atorTipo: 'paciente',
+        atorId: consulta.pacienteId,
+        acao: 'consulta.cancelada',
+      });
     });
   }
+
+  async reservasVencidas(agora, limite) {
+    // Sem bloqueio: é só a lista de candidatas. A reconciliação pergunta ao
+    // provedor FORA de qualquer transação — segurar bloqueio esperando rede
+    // travaria o agendamento — e a decisão final é refeita sob bloqueio.
+    const { rows } = await consultar(
+      `SELECT c.id, c.reserva_expira_em,
+              COALESCE(
+                array_agg(DISTINCT p.referencia_externa)
+                  FILTER (WHERE p.referencia_externa IS NOT NULL),
+                '{}'
+              ) AS referencias
+         FROM consulta c
+         LEFT JOIN pagamento p ON p.consulta_id = c.id
+        WHERE c.status = 'pendente_pagamento'
+          AND c.reserva_expira_em <= $1
+        GROUP BY c.id, c.reserva_expira_em
+        ORDER BY c.reserva_expira_em
+        LIMIT $2`,
+      [agora, limite]
+    );
+    return rows.map((linha) => ({
+      consultaId: Number(linha.id),
+      reservaExpiraEm: linha.reserva_expira_em,
+      referencias: linha.referencias,
+    }));
+  }
+
+  async expirarSeVencida(consultaId, agora) {
+    return transacao(async (cliente) => {
+      const consulta = await lerSobBloqueio(cliente, consultaId);
+      // Um pagamento pode tê-la confirmado entre a varredura e este bloqueio —
+      // o webhook trava a mesma linha. Quem chegar depois encontra o estado
+      // novo e respeita.
+      if (!consulta || !consulta.expirouAguardandoPagamento(agora)) {
+        return false;
+      }
+
+      await cancelarSobBloqueio(cliente, consulta, {
+        motivo: MOTIVO_CANCELAMENTO.RESERVA_EXPIRADA,
+        atorTipo: 'sistema',
+        atorId: null,
+        acao: 'consulta.expirada',
+      });
+      return true;
+    });
+  }
+}
+
+async function lerSobBloqueio(cliente, consultaId) {
+  const { rows } = await cliente.query(
+    `SELECT ${COLUNAS_DA_CONSULTA} FROM consulta WHERE id = $1 FOR UPDATE`,
+    [consultaId]
+  );
+  return rows.length ? paraConsulta(rows[0]) : null;
+}
+
+/**
+ * O que cancelar significa, venha o pedido do paciente ou da rotina de
+ * expiração: estado e motivo numa só escrita — o banco exige motivo em toda
+ * consulta cancelada —, horário de volta à grade, checkout aberto encerrado e
+ * auditoria. Tudo dentro da transação de quem chamou, com a consulta já
+ * bloqueada.
+ *
+ * Encerrar o checkout importa: sem isso, o paciente ainda poderia pagar pela
+ * página do provedor uma consulta que já não existe.
+ */
+async function cancelarSobBloqueio(cliente, consulta, { motivo, atorTipo, atorId, acao }) {
+  const { rows } = await cliente.query(
+    `UPDATE consulta
+        SET status = 'cancelada', motivo_cancelamento = $2, atualizado_em = now()
+      WHERE id = $1
+      RETURNING ${COLUNAS_DA_CONSULTA}`,
+    [consulta.id, motivo]
+  );
+
+  const liberado = await horarios.liberar(consulta.horarioId, cliente);
+  if (!liberado) {
+    // Consulta ativa cujo horário não estava reservado: inconsistência que
+    // não impede o cancelamento, mas precisa aparecer no log.
+    console.warn(
+      `Consulta ${consulta.id} cancelada, mas o horário ${consulta.horarioId} ` +
+        'não estava reservado.'
+    );
+  }
+
+  await cliente.query(
+    `UPDATE pagamento
+        SET status = 'expirado', atualizado_em = now()
+      WHERE consulta_id = $1 AND status = 'pendente' AND pagamento_externo_id IS NULL`,
+    [consulta.id]
+  );
+
+  await cliente.query(
+    `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
+     VALUES ($1, $2, $3, 'consulta', $4, $5)`,
+    [atorTipo, atorId, acao, consulta.id, { horarioId: consulta.horarioId, horarioLiberado: liberado }]
+  );
+
+  return paraConsulta(rows[0]);
 }
 
 module.exports = { RepositorioDeConsultasPg };
