@@ -230,10 +230,20 @@ requisições simultâneas para o mesmo horário. Para verificar:
 npm run carga
 ```
 
-São 10 rodadas; em cada uma, cem pacientes diferentes disputam o mesmo horário
-em duas fases — pelo HTTP, com o caminho completo da API, e direto no adaptador,
-sem a checagem prévia do caso de uso. O relatório fica em
-`docs/resultados/concorrencia/`, com data, commit e as latências brutas em JSON.
+São três fases de 10 rodadas, cada rodada com cem pacientes diferentes:
+
+| Fase | O que faz | O que prova |
+|---|---|---|
+| A | Cem `POST /consultas` pelo mesmo horário, pela API completa | Não há duplicidade na prática |
+| B | Cem chamadas direto ao adaptador, sem a checagem prévia | As recusas são do `UPDATE` condicional, e não do índice único |
+| C | O horário é reservado e cancelado (versão 2); cem pedidos chegam com a versão 0 | Só a condição de versão recusa — o papel próprio do lock otimista |
+
+A fase B distingue o `UPDATE` do índice pela sequência de ids de `consulta`: toda
+tentativa de `INSERT` consome um número, mesmo quando é desfeita, então uma
+rodada correta avança a sequência em exatamente um.
+
+O relatório fica em `docs/resultados/concorrencia/`, com data, commit, ambiente
+(provedor, isolamento, tempo de uma ida ao banco) e as latências brutas em JSON.
 Com `-- --ensaio`, roda sem gravar relatório; é assim que a integração contínua
 o executa.
 

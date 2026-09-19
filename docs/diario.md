@@ -688,6 +688,13 @@ contra uma porta vazia.
 
 ## 18/09/2026 — Etapa 7: teste de concorrência
 
+> **Corrigida em 19/09/2026.** Partes desta entrada afirmam mais do que o
+> experimento mede: a causa da divisão das recusas não foi medida, a
+> "contenção máxima" é limitada pelo pool, e o ganho da otimização está
+> superestimado. Mantida como estava, por registro — as correções estão em
+> "Revisão local da Etapa 7", mais abaixo. Não usar esta entrada sozinha como
+> fonte para o Capítulo 6.
+
 O critério da Seção 4.5 — "zero conflitos detectados no teste de carga simples
 com cem requisições simultâneas para o mesmo horário" — foi atendido: **10 de
 10 rodadas aprovadas pelo HTTP e 10 de 10 direto no adaptador, zero
@@ -773,5 +780,100 @@ A integração contínua passa a rodar o teste de concorrência em modo ensaio a
 cada envio — quando o repositório remoto existir.
 
 **260 testes passando.**
+
+---
+
+## 19/09/2026 — Revisão local da Etapa 7
+
+Revisão com dois revisores independentes: um de correção do código, outro de
+**método** — se o experimento mede o que o relatório e este diário afirmam. O
+segundo foi o mais valioso. Quinze achados, todos corrigidos. A conclusão
+central se manteve: zero agendamentos duplicados. O que não se sustentava eram
+afirmações sobre *qual defesa* decidia e *em que nível* houve simultaneidade.
+
+**O experimento não distinguia o lock do índice.** O adaptador devolve `null`
+tanto quando o UPDATE condicional não alcança a linha quanto quando o índice
+único recusa o INSERT, e nos dois casos o banco termina igual — o ROLLBACK
+desfaz a reserva. O avaliador aprovaria uma rodada em que o índice, e não o
+UPDATE, tivesse segurado os perdedores. A distinção veio da sequência de ids de
+`consulta`: toda tentativa de INSERT consome um número, mesmo desfeita. Rodada
+correta avança a sequência em exatamente um.
+
+**Validado removendo as defesas do código:**
+
+| Código | Fase A | Fase B | Fase C | Critério 4.5 |
+|---|---|---|---|---|
+| Correto | 10/10 | 10/10 | 10/10 | atendido |
+| UPDATE sem versão e sem status | 0/10 — 100 inserções por rodada | 0/10 — idem | 0/10 — pedido desatualizado aceito | **ainda atendido** |
+| UPDATE sem a condição de versão | 10/10 | 10/10 | **0/10** — pedido desatualizado aceito | atendido |
+
+Três leituras para o Capítulo 6:
+
+- **Defesa em profundidade, demonstrada.** Com o UPDATE sem condição nenhuma,
+  continuou havendo zero duplicidades: o índice único segurou. O critério da
+  4.5 sozinho não teria percebido nada; foi a sequência que acusou, em todas as
+  30 rodadas. As rodadas ficaram duas vezes mais lentas, porque cada perdedor
+  passou a inserir e desfazer segurando o bloqueio.
+- **O papel próprio do lock otimista só aparece na fase C.** Sem a condição de
+  versão, as fases A e B passaram inteiras — o status basta para disputa por
+  horário novo, como já previa a nota de ontem. Só a leitura desatualizada
+  (reservado, cancelado, disponível de novo, e alguém agendando com a tela
+  antiga) revela a falta dela: um pedido antigo é aceito e quem tinha a versão
+  atual fica sem o horário. Sem a fase C, o experimento inteiro passaria com o
+  mecanismo central do trabalho desligado.
+- **É a quinta vez que um teste verde esconderia um defeito**, e a primeira em
+  que o que estava cego era o próprio experimento de avaliação.
+
+**Correções ao texto de ontem** (a entrada de 18/09 ganhou um aviso):
+
+- *"Agora medido, não suposto"*, sobre a fila do pool explicar os 0% de recusas
+  na checagem prévia: o que foi medido é a divisão 0/99; a causa é **hipótese**
+  compatível com as latências — o vencedor em ~2 s bate com ~36 idas de ~55 ms
+  —, não registrada. E, se vale, o 0% é artefato da forma da carga, não
+  propriedade do sistema.
+- *"Chegam juntas ao UPDATE. Contenção máxima"*: no banco, o pool limita a 10
+  transações simultâneas. Os dados da fase B mostram os primeiros pedidos
+  terminando em escada de ~55 ms — o tempo de uma ida —, compatível com uns
+  nove perdedores por rodada esperando o bloqueio da linha, um de cada vez; os
+  outros ~90 encontram o horário já reservado. "Cem simultâneas" vale para a
+  chegada ao servidor, não para o banco.
+- *O ganho da otimização estava superestimado.* O −9,9% no p50 do adaptador é
+  cerca de 2,5 idas, e a mudança elimina uma, só no vencedor; o excesso coincide
+  com instabilidade da execução de base. A métrica que isola a mudança estava
+  nos JSON e não foi usada: **o vencedor da fase B caiu de 324–368 ms para
+  270–287 ms, nas dez rodadas — cerca de 55 ms, uma ida ao banco.** É esse o
+  número para o texto. Detalhe de cálculo: a "mediana" usada é o posto mais
+  próximo, e as 1000 latências não são amostras independentes, porque cada uma é
+  quase só função da posição na fila.
+- A recusa atribuída "à versão", nas fases A e B: versão e status falham juntos
+  para todo perdedor. Agora o relatório diz isso, e a fase C isola a versão.
+
+**Correções no executor.** Um erro no meio das rodadas deixava o servidor HTTP
+aberto e o processo pendurado; na CI, seis horas presas. Verificado com uma
+falha simulada: a versão anterior continuava parada quando foi morta aos 60 s;
+a nova termina em um segundo com código 1. Também: vigia de 15 minutos e prazo
+no passo da CI; contadores por horário; critério e anomalias em vereditos
+separados — uma resposta 500 é anomalia, não conflito, e o relatório não pode
+dizer "critério não atendido" por causa dela; ambiente lido da própria conexão
+(o relatório afirmava "Neon em São Paulo" fixo); nome de arquivo que não
+sobrescreve.
+
+**Execução oficial, com as três fases:** 30 de 30 rodadas sem anomalia, zero
+conflitos, relatório `2026-09-19-140759-fcee49d`. Neon sa-east-1 por conexão
+direta, READ COMMITTED, 56 ms por ida ao banco. A chegada ao servidor ficou
+entre 11 e 106 ms, contra 4 a 9 ms ontem — a causa não foi investigada, e nos
+dois casos é duas ordens de grandeza menor que a duração da rodada, de 2 a 4 s.
+
+Os dois relatórios de 18/09 ficam no repositório, como registro. O texto deles
+foi substituído pelo de hoje; os dados continuam válidos, e são deles que sai a
+comparação do vencedor da fase B.
+
+**Para a monografia**, além das notas de ontem: dez rodadas sem falha, mesmo
+tratadas como independentes, deixam o limite superior de 95% da taxa de falha
+por rodada em cerca de 26%. A garantia vem do mecanismo — o UPDATE condicional
+sob READ COMMITTED, e o índice por trás dele —, e o teste a **corrobora**. O
+texto deve dizer isso nessa ordem.
+
+**268 testes passando.**
 
 ---
