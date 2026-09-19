@@ -50,9 +50,16 @@ jobs:
       - name: Rodar a suíte
         run: npm test
 
-      # O critério da Seção 4.5, verificado a cada envio: 10 rodadas de cem
-      # pedidos simultâneos pelo mesmo horário, zero agendamentos duplicados.
+      # O critério da Seção 4.5, verificado a cada envio: cem pedidos
+      # simultâneos pelo mesmo horário, zero agendamentos duplicados, e cada
+      # defesa exercitada — a fase B confirma que as recusas são do UPDATE, e a
+      # fase C, que a versão recusa leitura desatualizada. As duas independem do
+      # ambiente: aqui, com o banco local, a divisão da fase A entre checagem
+      # prévia e banco pode ser outra, e isso não é falha.
+      #
       # Em modo ensaio, porque os relatórios oficiais vêm de execuções
-      # documentadas, não do runner.
+      # documentadas, não do runner. O prazo é a segunda proteção contra um
+      # processo pendurado; a primeira é o vigia dentro do próprio script.
       - name: Teste de concorrência (Seção 4.5)
         run: npm run carga -- --ensaio
+        timeout-minutes: 15
