@@ -15,6 +15,7 @@ const {
   resumir,
   avaliarRodadaHttp,
   avaliarRodadaAdaptador,
+  avaliarRodadaDesatualizada,
 } = require('../carga/avaliacao');
 
 const N = 100;
@@ -35,6 +36,9 @@ function rodadaHttpCorreta() {
       status: 'reservado',
       auditorias: 1,
       valorCentavos: PRECO,
+      // Só o vencedor chegou a tentar o INSERT. Cada tentativa consome um
+      // número da sequência de ids, mesmo quando é desfeita.
+      insercoesTentadas: 1,
     },
   };
 }
@@ -46,7 +50,20 @@ function rodadaAdaptadorCorreta() {
       { tipo: 'consulta' },
       ...Array.from({ length: N - 1 }, () => ({ tipo: 'nulo' })),
     ],
-    banco: { consultasAtivas: 1, versao: 1 },
+    banco: { consultasAtivas: 1, versao: 1, insercoesTentadas: 1 },
+  };
+}
+
+/**
+ * Fase C: o horário foi reservado e cancelado — voltou a disponível, na versão
+ * 2 — e cem pedidos chegam com a versão 0 que leram antes disso.
+ */
+function rodadaDesatualizadaCorreta() {
+  return {
+    n: N,
+    respostas: Array.from({ length: N }, () => ({ status: 409, codigo: 'HORARIO_INDISPONIVEL' })),
+    banco: { consultasAtivas: 0, versao: 2, status: 'disponivel', insercoesTentadas: 0 },
+    respostaAtualizada: { status: 201, codigo: null },
   };
 }
 
@@ -141,6 +158,20 @@ describe('avaliarRodadaHttp', () => {
     expect(resultado.falhas.join(' ')).toMatch(/99 respostas/);
   });
 
+  test('recusa decidida pelo índice, e não pelo UPDATE, reprova', () => {
+    // O cenário que a primeira versão do avaliador aprovava: sem as condições
+    // do UPDATE, cada perdedor chega ao INSERT, bate no índice único e tudo é
+    // desfeito. O banco termina idêntico ao correto — menos a sequência.
+    const rodada = rodadaHttpCorreta();
+    rodada.banco.insercoesTentadas = N;
+
+    const resultado = avaliarRodadaHttp(rodada);
+
+    expect(resultado.aprovada).toBe(false);
+    expect(resultado.conflitos).toBe(0);
+    expect(resultado.falhas.join(' ')).toMatch(/índice/);
+  });
+
   test.each([
     ['versão diferente de 1', { versao: 2 }, /versão/],
     ['horário não reservado', { status: 'disponivel' }, /status/],
@@ -192,5 +223,66 @@ describe('avaliarRodadaAdaptador', () => {
     rodada.banco.versao = 3;
 
     expect(avaliarRodadaAdaptador(rodada).aprovada).toBe(false);
+  });
+
+  test('recusa decidida pelo índice reprova — a fase B precisa provar o UPDATE', () => {
+    const rodada = rodadaAdaptadorCorreta();
+    rodada.banco.insercoesTentadas = N;
+
+    const resultado = avaliarRodadaAdaptador(rodada);
+
+    expect(resultado.aprovada).toBe(false);
+    expect(resultado.falhas.join(' ')).toMatch(/índice/);
+  });
+});
+
+describe('avaliarRodadaDesatualizada', () => {
+  test('a rodada correta é aprovada', () => {
+    expect(avaliarRodadaDesatualizada(rodadaDesatualizadaCorreta())).toEqual({
+      aprovada: true,
+      conflitos: 0,
+      falhas: [],
+    });
+  });
+
+  test('um pedido com a versão antiga aceito reprova — é a leitura desatualizada passando', () => {
+    // Exatamente o que aconteceria sem a condição de versão: o status confere
+    // (o horário está disponível de novo), e o primeiro pedido antigo venceria.
+    const rodada = rodadaDesatualizadaCorreta();
+    rodada.respostas[0] = { status: 201, codigo: null };
+    rodada.banco.consultasAtivas = 1;
+    rodada.banco.insercoesTentadas = 1;
+
+    const resultado = avaliarRodadaDesatualizada(rodada);
+
+    expect(resultado.aprovada).toBe(false);
+    expect(resultado.falhas.join(' ')).toMatch(/versão antiga/);
+  });
+
+  test('recusa decidida pelo índice reprova', () => {
+    const rodada = rodadaDesatualizadaCorreta();
+    rodada.banco.insercoesTentadas = 3;
+
+    expect(avaliarRodadaDesatualizada(rodada).falhas.join(' ')).toMatch(/índice/);
+  });
+
+  test('o pedido com a versão atual recusado reprova — a recusa não era por desatualização', () => {
+    const rodada = rodadaDesatualizadaCorreta();
+    rodada.respostaAtualizada = { status: 409, codigo: 'HORARIO_INDISPONIVEL' };
+
+    const resultado = avaliarRodadaDesatualizada(rodada);
+
+    expect(resultado.aprovada).toBe(false);
+    expect(resultado.falhas.join(' ')).toMatch(/versão atual/);
+  });
+
+  test.each([
+    ['versão alterada pela rajada', { versao: 3 }],
+    ['horário tirado da grade', { status: 'reservado' }],
+  ])('%s reprova', (_rotulo, estrago) => {
+    const rodada = rodadaDesatualizadaCorreta();
+    Object.assign(rodada.banco, estrago);
+
+    expect(avaliarRodadaDesatualizada(rodada).aprovada).toBe(false);
   });
 });
