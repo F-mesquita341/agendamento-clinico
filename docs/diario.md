@@ -1090,3 +1090,26 @@ falhar aberto quando o provedor não responde derruba os dois de falha fechada
 mais o de integração; e tirar a chamada do `servidor.js` derruba só o de
 integração, que ficou trinta segundos de pé até o `SIGKILL` — porque a API
 subiu, que é exatamente o que ele existe para impedir. 389 testes.
+
+## 20/09/2026 — Primeira publicação no Render falha por classificação de dependência
+
+O serviço foi criado pelo Blueprint e o deploy falhou. A causa não precisou do
+log para ser encontrada: o `render.yaml` define `NODE_ENV=production`, e nesse
+modo o `npm ci` omite as devDependencies. O `node-pg-migrate` estava lá — e o
+comando de início é `npm run migrate && npm start`. O Render instalou as
+dependências, descartou a ferramenta de migração e o primeiro comando do start
+morreu antes de tocar no banco.
+
+Simular a instalação localmente com `NODE_ENV=production npm ci --dry-run`
+imprime `remove node-pg-migrate 9.0.0`, que é a prova direta.
+
+O erro é de classificação, não de configuração. Enquanto migração era coisa de
+máquina local, `node-pg-migrate` era mesmo dependência de desenvolvimento. A
+partir do momento em que o start em produção roda migrations, ele passou a ser
+dependência de produção — e ninguém reclassificou. A lição vale além deste
+caso: `devDependencies` não quer dizer "ferramenta", quer dizer "não é preciso
+para a aplicação rodar". Mudou o que a aplicação faz ao subir, muda a
+classificação.
+
+Nenhum outro pacote de desenvolvimento é usado fora dos testes — `jest` e
+`supertest` continuam onde estavam.
