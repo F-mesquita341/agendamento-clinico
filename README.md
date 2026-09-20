@@ -245,10 +245,18 @@ vencida com `motivoCancelamento: "reserva_expirada"`, devolve o horário à grad
 encerra o checkout. Antes, ela pergunta ao Mercado Pago se houve pagamento cujo
 aviso se perdeu — e, se houve, confirma em vez de expirar.
 
-Travas de sandbox: o banco recusa pagamento fora do sandbox, e o webhook ignora
-pagamento em modo real, registrando-o como anomalia. O que vai ao Mercado Pago
-é o mínimo — o item "Consulta médica", o valor, uma referência aleatória e o
-prazo; nada do paciente.
+**Trava de sandbox:** quem impede um pagamento real de confirmar consulta é a
+verificação do webhook — um pagamento marcado como real pelo Mercado Pago é
+ignorado e registrado como anomalia, sem virar linha de pagamento. O banco tem
+uma restrição que só aceita `ambiente = 'sandbox'` na tabela de pagamentos, mas
+ela é uma segunda linha de defesa contra escrita manual: nada no código escreve
+outro valor.
+
+Cancelar uma consulta **já paga** não estorna nada — estorno automático está
+fora do escopo —, mas registra em auditoria que há estorno a fazer.
+
+O que vai ao Mercado Pago é o mínimo: o item "Consulta médica", o valor, uma
+referência aleatória e o prazo. Nada do paciente.
 
 | Código | Quando |
 |---|---|

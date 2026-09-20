@@ -954,3 +954,67 @@ permitir distinguir), e a validação da assinatura contra uma notificação rea
 que substitui a documentação que não pôde ser lida.
 
 ---
+
+## 19/09/2026 — Revisão local da parte A, e a API no GitHub
+
+Revisão da parte A com dez achados, todos corrigidos. Uma ressalva de método
+primeiro: os três revisores independentes que eu tinha disparado morreram no
+limite de uso da conta, e a revisão acabou sendo feita só por mim — quem
+escreveu o código revisando o próprio código, com os mesmos pontos cegos. Nas
+etapas 6 e 7, foram justamente os revisores independentes que acharam o que eu
+não tinha visto. Fica registrado como limitação desta revisão.
+
+**O achado mais sério não era um defeito de código, e sim uma lacuna do
+modelo.** Cancelar uma consulta JÁ PAGA encerrava o checkout aberto, devolvia o
+horário e não dizia nada sobre o dinheiro recebido: a consulta sumia da agenda
+e nenhum registro indicava que havia estorno a fazer. Agora cada pagamento
+aprovado da consulta cancelada vira uma linha de auditoria
+`pagamento.estorno_pendente`, na mesma transação. Estorno automático continua
+fora do escopo; o que não podia é o caso ficar invisível.
+
+**Duas afirmações minhas estavam erradas no texto.** O README dizia que "o
+banco recusa pagamento fora do sandbox". Não recusa: a restrição do banco só
+impede gravar a palavra 'producao' na coluna de ambiente, e nada no código
+escreve outro valor ali. Quem de fato barra um pagamento real é a verificação
+do webhook. O texto foi corrigido, e a restrição do banco passou a ser
+descrita pelo que é — segunda linha de defesa contra escrita manual.
+
+**O teste da trava aceitava qualquer sessão bloqueada.** Ele esperava o banco
+mostrar *alguma* sessão parada aguardando bloqueio — o que outra execução da
+suíte, ou uma conexão deixada para trás, satisfaria sozinha, liberando o teste
+antes de o webhook chegar ao ponto crítico. Agora usa `pg_blocking_pids` e
+exige que o bloqueado esteja travado **pela transação do próprio teste**. É o
+mesmo tipo de fragilidade que já nos enganou seis vezes, desta vez pego antes
+de enganar.
+
+Outras correções: reversão de pagamento aprovado (estorno ou contestação)
+passou a ser registrada como anomalia, em vez de mudar o status em silêncio; a
+anomalia não é mais gravada de novo a cada reenvio da mesma notificação; o
+checkout sem endereço de pagamento falha na hora, em vez de gravar um checkout
+impagável; o tipo do evento no webhook passou a ser lido só da query, que é a
+parte assinada; a subida avisa quando há credencial do Mercado Pago sem URL
+pública; e o desligamento, que não tinha teste nenhum, ganhou um que sobe o
+processo de verdade e manda SIGTERM — pulado no Windows, que não tem sinais
+POSIX, e executado na integração contínua, que é Linux como o Render.
+
+Cada correção foi confirmada reintroduzindo o defeito: cinco defeitos, sete
+testes reprovados, nenhum outro.
+
+**Primeira publicação no GitHub.** O repositório é público, como decidido. Antes
+do envio, varredura do histórico inteiro: nenhuma credencial, nenhuma string de
+conexão real — as duas ocorrências marcadas eram o nome do cabeçalho
+`x-signature` no código e a senha `postgres` do banco descartável da integração
+contínua. E a integração contínua, que existia desde a Etapa 3 e nunca tinha
+rodado de verdade, passou de primeira nas duas branches — incluindo o teste de
+carga da Seção 4.5 contra um PostgreSQL local, um regime bem diferente do
+nosso.
+
+O serviço do Render passou a ser descrito no próprio repositório
+(`render.yaml`), sem segredo nenhum: as sete variáveis sensíveis são pedidas no
+painel. Região Virginia, porque o plano gratuito não tem região no Brasil — cada
+ida ao banco em São Paulo passa a custar por volta de 120 ms, contra 56 ms
+medidos localmente, e isso precisa constar do capítulo de resultados.
+
+**378 testes passando**, um pulado no Windows.
+
+---
