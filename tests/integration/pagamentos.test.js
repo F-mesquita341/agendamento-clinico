@@ -353,6 +353,61 @@ describe('POST /webhooks/mercadopago', () => {
     expect(await estado(consulta.id)).toMatchObject({ status: 'pendente_pagamento' });
   });
 
+  describe('o que a rota deixa registrado', () => {
+    // Processar e ignorar respondem 200 com o mesmo corpo. Sem estas linhas,
+    // uma notificação descartada é indistinguível de uma processada — e se o
+    // Mercado Pago mandar o evento noutro formato, todo pagamento se perde sem
+    // rastro. É diagnóstico, não enfeite: por isso tem teste.
+    let avisos;
+    let registros;
+
+    beforeEach(() => {
+      avisos = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      registros = jest.spyOn(console, 'log').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      avisos.mockRestore();
+      registros.mockRestore();
+    });
+
+    test('a notificação ignorada diz qual tipo chegou e o que veio na query', async () => {
+      const { referencia } = await comCheckout();
+      const pagamento = gateway.pagar(referencia);
+
+      await notificar(pagamento.id, { tipo: 'merchant_order' });
+
+      const texto = avisos.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(texto).toMatch(/ignorado/);
+      expect(texto).toMatch(/merchant_order/);
+      // Os nomes dos parâmetros são o diagnóstico: revelam um formato
+      // diferente do esperado, como o `topic` do IPN antigo.
+      expect(texto).toMatch(/data\.id/);
+      expect(texto).toMatch(/type/);
+    });
+
+    test('a notificação processada deixa o desfecho registrado', async () => {
+      const { referencia } = await comCheckout();
+      const pagamento = gateway.pagar(referencia);
+
+      await notificar(pagamento.id);
+
+      const texto = registros.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(texto).toMatch(new RegExp(pagamento.id));
+      expect(texto).toMatch(/consulta_confirmada/);
+    });
+
+    test('a anomalia aparece no registro junto do desfecho', async () => {
+      const { referencia } = await comCheckout();
+      const pagamento = gateway.pagar(referencia, { valorCentavos: 100 });
+
+      await notificar(pagamento.id);
+
+      const texto = registros.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(texto).toMatch(/valor_divergente/);
+    });
+  });
+
   test('recusado e depois aprovado no mesmo checkout: a aprovação confirma', async () => {
     const { consulta, referencia } = await comCheckout();
     await notificar(gateway.pagar(referencia, { status: 'recusado' }).id);

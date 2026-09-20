@@ -54,10 +54,24 @@ function criarRotasDeWebhook({ gateway, segredo, pagamentos = new RepositorioDeP
       // assinada de outro evento, reenviada com o corpo trocado, seria aceita
       // como pagamento.
       if (req.query.type !== 'payment') {
+        // Descartar em silêncio seria indistinguível, de fora, de "processei e
+        // não havia o que fazer": os dois respondem 200. Se o Mercado Pago
+        // mandar o evento noutro formato — o IPN antigo usa `topic` e `id` —,
+        // todo pagamento se perderia sem deixar rastro. Os NOMES dos
+        // parâmetros são o diagnóstico: dizem o que de fato chegou.
+        console.warn(
+          `Webhook do Mercado Pago ignorado: type=${req.query.type ?? '(ausente)'}; ` +
+            `parâmetros na query: ${Object.keys(req.query).join(', ') || '(nenhum)'}`
+        );
         return res.status(200).json({ recebido: true });
       }
 
-      await processar.executar({ pagamentoId: idDoDado });
+      const resultado = await processar.executar({ pagamentoId: idDoDado });
+      // O desfecho já era decidido e devolvido; até aqui era descartado.
+      console.log(
+        `Webhook do Mercado Pago: pagamento ${idDoDado} → ${resultado.desfecho}` +
+          (resultado.anomalia ? ` (anomalia: ${resultado.anomalia})` : '')
+      );
       return res.status(200).json({ recebido: true });
     } catch (erro) {
       return next(erro);
