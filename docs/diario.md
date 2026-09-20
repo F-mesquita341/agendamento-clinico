@@ -1018,3 +1018,75 @@ medidos localmente, e isso precisa constar do capítulo de resultados.
 **378 testes passando**, um pulado no Windows.
 
 ---
+
+## 19–20/09/2026 — A primeira ligação real com o Mercado Pago derruba uma trava
+
+Primeira conversa da API com o Mercado Pago de verdade, ainda sem publicar
+nada: criar preferência e buscar pagamento são chamadas de saída, que funcionam
+de qualquer máquina. Escrevi um verificador (`npm run verificar:sandbox`) para
+isso — a suíte usa `fetch` falso e prova o que o adaptador ENVIA, não o que o
+provedor aceita.
+
+O checkout abriu com "Consulta médica — R$ 180,50" e mais nada: a minimização
+prometida no projeto, agora visível na tela do provedor. Paguei com a conta de
+teste compradora e um cartão de teste. Aprovado. E então:
+
+    modo real ... true
+    ✗ é pagamento de sandbox, não real
+
+**A trava de sandbox do domínio estava errada desde a concepção.** Ela recusava
+pagamento com `live_mode` verdadeiro, supondo que "modo real" e "fora do
+sandbox" fossem a mesma coisa. Não são: uma conta de teste do Mercado Pago é
+uma conta comum operando em **modo produção** — o que é falso é a conta, não o
+modo. Dinheiro fictício, cartão fictício, `live_mode: true`. Em produção,
+aquela verificação recusaria todos os pagamentos do trabalho, e nenhuma
+consulta seria confirmada. Pior: como conta real também devolve verdadeiro, o
+campo não distinguia o caso perigoso de jeito nenhum. Uma trava que barra o
+legítimo e não barra o perigoso é pior que trava nenhuma, porque dá a
+impressão de que o problema está resolvido.
+
+Vale reparar em como isso apareceu. Não foi um teste da suíte: nenhum teste com
+dublê poderia ter pego, porque o dublê devolvia `modoReal: false` — eu escrevi
+o dublê com a suposição errada embutida. **O que pegou foi uma verificação
+contra o serviço real, feita antes de publicar.** É o mesmo papel que o teste
+de token real do Firebase cumpriu na Etapa 5. Fica a regra: toda suposição
+sobre o comportamento de um sistema externo é hipótese até ser conferida contra
+ele; o dublê propaga a suposição, não a testa.
+
+**A proteção mudou de lugar e ficou mais forte.** A API agora pergunta ao
+Mercado Pago, na subida, de quem é a credencial (`GET /users/me`) e só abre a
+porta se a conta tiver a marca `test_user`, que é o provedor quem põe. Recusa
+antes de existir qualquer cobrança, em vez de depois de o cartão de alguém já
+ter sido debitado. Falha fechada: se o provedor não responde, a API não sobe —
+"não consegui verificar" não é "está tudo bem", e esta é a única coisa entre o
+trabalho e o dinheiro de um participante de pesquisa. Para desenvolver sem
+rede, basta tirar a credencial do `.env`.
+
+`descreverConta` entrou no **contrato** do gateway, e não só no adaptador: a
+restrição a sandbox é exigência do trabalho, não detalhe de implementação, e
+nenhum provedor deve poder ser ligado a esta API sem saber responder se o
+dinheiro que move é de verdade.
+
+**Uma proteção da revisão anterior foi removida, de propósito.** Com o modo
+real fora do caminho, toda anomalia passou a vir acompanhada de gravação do
+pagamento, e o reenvio da mesma notificação sai antes, no
+`statusAnterior === status` do domínio. A conferência de auditoria repetida
+ficou sem nenhum caminho que a alcançasse. Código que nenhum teste consegue
+derrubar não se mantém "por garantia" — foi removido, e o teste que o cobria
+passou a exercer a proteção que de fato existe.
+
+**Um buraco que eu mesmo abri, e fechei.** A decisão da trava tinha teste de
+unidade, mas nada provava que o `servidor.js` a chamava: apagar a verificação
+de lá não derrubaria teste nenhum. Agora um teste de integração sobe o processo
+de verdade com credencial inválida e exige que a porta não abra. Ao escrevê-lo,
+apareceu um defeito real: `process.exit` com o soquete do provedor ainda aberto
+produz asserção do libuv no Windows e código de saída 0xC0000409 no lugar de 1
+— a mensagem de erro fica escondida atrás de um estouro. Corrigido nos dois
+pontos de saída da subida.
+
+Confirmação por reintrodução, em três rodadas: aceitar conta sem a marca
+derruba dois testes do adaptador; ignorar o veredito derruba o da conta real;
+falhar aberto quando o provedor não responde derruba os dois de falha fechada
+mais o de integração; e tirar a chamada do `servidor.js` derruba só o de
+integração, que ficou trinta segundos de pé até o `SIGKILL` — porque a API
+subiu, que é exatamente o que ele existe para impedir. 389 testes.

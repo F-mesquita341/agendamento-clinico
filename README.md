@@ -125,6 +125,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm test` | Roda a suíte completa |
 | `npm run test:unit` | Só os testes de unidade, sem banco |
 | `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
+| `npm run verificar:sandbox` | Prova a credencial do Mercado Pago contra a API real: confirma que é conta de teste, cria um checkout e confere o pagamento |
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
 
 ## Convenções da API
@@ -236,7 +237,7 @@ API nem pelo aplicativo.
 2. O paciente paga na página do Mercado Pago.
 3. O Mercado Pago avisa a API pelo webhook. A API **confere a assinatura**, busca
    o pagamento **no próprio Mercado Pago** — o conteúdo do aviso não é usado —,
-   confere valor, moeda e modo sandbox, e confirma a consulta.
+   confere valor e moeda, e confirma a consulta.
 4. O app acompanha por `GET /consultas/:id` até ver `confirmada`. O retorno da
    página de pagamento não confirma nada.
 
@@ -245,12 +246,23 @@ vencida com `motivoCancelamento: "reserva_expirada"`, devolve o horário à grad
 encerra o checkout. Antes, ela pergunta ao Mercado Pago se houve pagamento cujo
 aviso se perdeu — e, se houve, confirma em vez de expirar.
 
-**Trava de sandbox:** quem impede um pagamento real de confirmar consulta é a
-verificação do webhook — um pagamento marcado como real pelo Mercado Pago é
-ignorado e registrado como anomalia, sem virar linha de pagamento. O banco tem
-uma restrição que só aceita `ambiente = 'sandbox'` na tabela de pagamentos, mas
-ela é uma segunda linha de defesa contra escrita manual: nada no código escreve
-outro valor.
+**Trava de sandbox:** a API **não sobe** com credencial de conta real. Na
+subida, ela pergunta ao Mercado Pago de quem é a credencial (`GET /users/me`) e
+só abre a porta se a conta tiver a marca `test_user`. Se o provedor não
+responder, também não sobe: "não consegui verificar" não é "está tudo bem".
+
+Essa verificação substituiu outra, que recusava pagamento marcado como real
+pelo Mercado Pago. A primeira ligação com a API real mostrou que aquele campo
+não distingue nada — pagamento feito com conta de teste, cartão de teste e
+dinheiro fictício volta com `live_mode: true`, porque a conta de teste opera em
+modo produção. A trava antiga recusaria todo pagamento legítimo e ainda assim
+não pegaria o caso perigoso. A nova acontece antes de existir qualquer cobrança,
+e não depois. O modo relatado pelo provedor continua gravado na auditoria de
+cada pagamento, como informação.
+
+O banco tem uma restrição que só aceita `ambiente = 'sandbox'` na tabela de
+pagamentos — segunda linha de defesa contra escrita manual: nada no código
+escreve outro valor.
 
 Cancelar uma consulta **já paga** não estorna nada — estorno automático está
 fora do escopo —, mas registra em auditoria que há estorno a fazer.
