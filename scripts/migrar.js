@@ -34,7 +34,13 @@ if (!url) {
 }
 
 async function migrar() {
-  const rotulo = noBancoDeTeste ? 'teste' : 'desenvolvimento';
+  // Em produção este script roda na subida do serviço, antes de abrir a porta;
+  // dizer "desenvolvimento" no log da publicação confundiria o diagnóstico.
+  const rotulo = noBancoDeTeste
+    ? 'teste'
+    : config.NODE_ENV === 'production'
+      ? 'PRODUÇÃO'
+      : 'desenvolvimento';
   const direcao = desfazer ? 'down' : 'up';
 
   console.log(

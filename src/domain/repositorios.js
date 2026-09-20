@@ -65,9 +65,10 @@ class RepositorioDeHorarios {
    * Devolve o horário à grade, incrementando a versão.
    *
    * Só age sobre horário `reservado`: o que a clínica bloqueou continua
-   * bloqueado. O segundo argumento, opcional, permite rodar dentro de uma
-   * transação já aberta — é como o cancelamento libera o horário junto com a
-   * mudança de estado da consulta.
+   * bloqueado. O segundo argumento é OBRIGATÓRIO: o cliente de uma transação já
+   * aberta. Liberar um horário sozinho, fora da transação que muda a consulta e
+   * sem auditoria, deixaria horário livre com consulta ativa — o estado que o
+   * índice único depois recusa sem explicar.
    *
    * @returns {Promise<boolean>} se o horário voltou para a grade.
    */
@@ -129,6 +130,31 @@ class RepositorioDeConsultas {
    */
   async cancelar(_consultaId) {
     naoImplementado('RepositorioDeConsultas.cancelar');
+  }
+
+  /**
+   * Reservas que passaram do prazo sem pagamento, com as referências dos
+   * checkouts delas — para a reconciliação perguntar ao provedor antes de
+   * expirar. Leitura sem bloqueio: a decisão é refeita dentro da transação.
+   *
+   * @param {Date} _agora
+   * @param {number} _limite quantas por rodada da rotina
+   * @returns {Promise<Array<{consultaId: number, reservaExpiraEm: Date, referencias: string[]}>>}
+   */
+  async reservasVencidas(_agora, _limite) {
+    naoImplementado('RepositorioDeConsultas.reservasVencidas');
+  }
+
+  /**
+   * Expira a reserva, se ela ainda estiver vencida quando o bloqueio for obtido:
+   * cancela com motivo `reserva_expirada`, devolve o horário, encerra o checkout
+   * aberto e audita com ator `sistema` — tudo na mesma transação. Se um
+   * pagamento a confirmou nesse meio-tempo, não faz nada.
+   *
+   * @returns {Promise<boolean>} se expirou
+   */
+  async expirarSeVencida(_consultaId, _agora) {
+    naoImplementado('RepositorioDeConsultas.expirarSeVencida');
   }
 }
 

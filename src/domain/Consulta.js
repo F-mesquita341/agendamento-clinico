@@ -31,6 +31,15 @@ const CANCELAVEIS = Object.freeze([
   STATUS.CONFIRMADA,
 ]);
 
+/**
+ * Por que a consulta foi cancelada. Para a análise de absenteísmo, desistir e
+ * abandonar o checkout são fenômenos diferentes — ver migration 008.
+ */
+const MOTIVO_CANCELAMENTO = Object.freeze({
+  PACIENTE: 'paciente',
+  RESERVA_EXPIRADA: 'reserva_expirada',
+});
+
 class Consulta {
   constructor({
     id,
@@ -41,6 +50,7 @@ class Consulta {
     reservaExpiraEm,
     lembreteEnviadoEm,
     criadoEm,
+    motivoCancelamento = null,
   }) {
     this.id = id;
     this.pacienteId = pacienteId;
@@ -50,6 +60,7 @@ class Consulta {
     this.reservaExpiraEm = reservaExpiraEm ? new Date(reservaExpiraEm) : null;
     this.lembreteEnviadoEm = lembreteEnviadoEm ? new Date(lembreteEnviadoEm) : null;
     this.criadoEm = criadoEm ? new Date(criadoEm) : null;
+    this.motivoCancelamento = motivoCancelamento;
   }
 
   /** Ativa = ocupa o horário. Tudo menos cancelada. */
@@ -80,6 +91,33 @@ class Consulta {
 
   precisaDeLembrete() {
     return this.status === STATUS.CONFIRMADA && this.lembreteEnviadoEm === null;
+  }
+
+  /**
+   * O paciente pode abrir o checkout desta consulta?
+   *
+   * Só enquanto ela espera pagamento e a reserva não venceu. Depois do prazo, o
+   * horário está para ser devolvido à grade — cobrar por ele seria vender o que
+   * já não está garantido.
+   */
+  garantirQuePodeSerPagaPor(pacienteId, agora) {
+    if (!this.pertenceAo(pacienteId)) {
+      throw new AcessoNegado('Esta consulta pertence a outro paciente.');
+    }
+    if (!this.aguardandoPagamento()) {
+      throw new RegraDeNegocio(
+        'CONSULTA_NAO_PAGAVEL',
+        this.status === STATUS.CONFIRMADA
+          ? 'Esta consulta já está paga.'
+          : 'Esta consulta não pode mais ser paga.'
+      );
+    }
+    if (this.expirouAguardandoPagamento(agora)) {
+      throw new RegraDeNegocio(
+        'RESERVA_EXPIRADA',
+        'O prazo para pagar esta reserva terminou. Escolha o horário de novo.'
+      );
+    }
   }
 
   garantirQuePodeSerCanceladaPor(pacienteId) {
@@ -114,4 +152,4 @@ class Consulta {
   }
 }
 
-module.exports = { Consulta, STATUS_CONSULTA: STATUS };
+module.exports = { Consulta, STATUS_CONSULTA: STATUS, MOTIVO_CANCELAMENTO };

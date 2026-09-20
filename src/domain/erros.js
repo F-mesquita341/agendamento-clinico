@@ -77,6 +77,18 @@ class ConsultaSobreposta extends RegraDeNegocio {
 }
 
 /**
+ * O provedor de pagamento não respondeu, ou não está configurado.
+ *
+ * 503, e não 500: não é defeito da API nem do pedido, e tentar de novo em
+ * instantes costuma resolver. A ação diz isso ao aplicativo.
+ */
+class PagamentoIndisponivel extends ErroDeDominio {
+  constructor(mensagem = 'O pagamento está indisponível no momento. Tente de novo em instantes.') {
+    super('PAGAMENTO_INDISPONIVEL', mensagem, { status: 503, acao: 'tentar_novamente' });
+  }
+}
+
+/**
  * Token expirado é diferente de token inválido: a pessoa não fez nada de
  * errado, só o tempo passou. A ação diz ao app para renovar o token e repetir
  * a requisição em silêncio, em vez de mandar a pessoa de volta ao login.
@@ -128,6 +140,7 @@ module.exports = {
   AcessoNegado,
   RegraDeNegocio,
   ConsultaSobreposta,
+  PagamentoIndisponivel,
   SessaoExpirada,
   PerfilNaoCadastrado,
   PacienteJaCadastrado,

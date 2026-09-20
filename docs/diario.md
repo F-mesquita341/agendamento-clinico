@@ -877,3 +877,144 @@ texto deve dizer isso nessa ordem.
 **268 testes passando.**
 
 ---
+
+## 19/09/2026 — Etapa 8, parte A: pagamento, webhook e expiração
+
+A parte que não depende de contas externas: o ciclo da consulta fecha. Ela
+nasce aguardando pagamento, o paciente abre o checkout, o Mercado Pago avisa, a
+consulta é confirmada — ou a reserva vence e o horário volta à grade. O
+Mercado Pago é um dublê nos testes; a integração de verdade é a parte B.
+
+**Decisões principais.**
+
+- *Checkout Pro*, não formulário de cartão no app: nenhum dado de cartão passa
+  pela API.
+- *Só o webhook confirma, e nunca pelo conteúdo do aviso.* A notificação diz "o
+  pagamento X mudou"; a API busca X no próprio Mercado Pago e confere valor,
+  moeda e modo sandbox antes de confirmar.
+- *Assinatura antes de tudo*, HMAC SHA-256 com comparação em tempo constante.
+  **Desvio do plano:** não há recusa por instante antigo. Como o estado é sempre
+  buscado no provedor, reproduzir um aviso legítimo é inofensivo; e se o
+  Mercado Pago reenviar mantendo o instante original, uma tolerância recusaria
+  justamente os reenvios de que a API depende quando hiberna.
+- *LGPD:* ao provedor vão o item "Consulta médica", o valor, uma referência
+  aleatória e o prazo. Nada do paciente — verificado por teste que inspeciona o
+  corpo enviado.
+- *O checkout expira junto com a reserva*, e pedir de novo devolve o mesmo:
+  dois checkouts abertos permitiriam pagar duas vezes. O banco garante um só
+  aberto por consulta.
+- *Motivo do cancelamento* passa a ser gravado — `paciente` ou
+  `reserva_expirada` —, e o banco exige motivo em toda consulta cancelada.
+  Para a análise de absenteísmo, desistir e abandonar o checkout são coisas
+  diferentes.
+- *Reconciliação antes de expirar:* no plano gratuito do Render a API hiberna e
+  o aviso pode se perder; a rotina pergunta ao Mercado Pago antes de cancelar a
+  consulta de quem talvez tenha pago.
+- **Acrescentado durante a implementação:** um limite para o adiamento. Se o
+  provedor estiver fora do ar, a expiração é adiada — mas, passados 30 minutos
+  do vencimento, a reserva expira assim mesmo. Sem isso, uma queda longa do
+  Mercado Pago prenderia horários indefinidamente.
+- *Pagamento aprovado depois da expiração* não ressuscita a consulta — o
+  horário pode ser de outra pessoa: vira anomalia registrada, para estorno.
+- As duas pendências herdadas da Etapa 6 resolvidas: `liberar` passou a exigir o
+  cliente de uma transação, e o desligamento trata a falha ao fechar o banco e
+  tem prazo.
+
+**Mais um teste verde que não provava nada — o sexto do trabalho, e o primeiro
+previsto.** O teste que dispara webhook e expiração ao mesmo tempo passou seis
+vezes seguidas com o `FOR UPDATE` removido: a ordem perigosa depende do acaso.
+Foi substituído por um teste que **força** a ordem — abre a expiração pela
+metade, lança o webhook, espera o próprio banco mostrar uma sessão aguardando
+bloqueio (em `pg_stat_activity`) e só então confirma. Com o defeito, falha três
+de três; sem ele, passa. O mesmo desenho, invertido, prova que a expiração não
+cancela uma consulta paga no meio do caminho.
+
+**Uma segunda rede, que ninguém planejou.** Com o bloqueio removido, quem
+impediu a confirmação por cima do cancelamento foi a restrição criada para o
+motivo de cancelamento: a consulta cancelada carregava `reserva_expirada`, e o
+banco recusou deixá-la "confirmada" com esse motivo. O estado ficaria coerente
+mesmo sem o bloqueio — mas por um erro 500 e um reenvio do Mercado Pago, e não
+por projeto. O bloqueio continua sendo o mecanismo; a restrição, a rede.
+
+**Um teste que falhava por acaso, escrito por mim.** Verificava que a
+referência aleatória "não continha" o id da consulta — que vale 1 logo depois da
+limpeza do banco, e um UUID contém o dígito 1 em cerca de 87% das vezes. Falhou
+de forma intermitente durante a reintrodução de defeitos, e só por isso foi
+notado. Passou a verificar o que importa: que a referência é um UUID aleatório.
+
+Defeitos reintroduzidos, todos acusados: verificação de assinatura desligada,
+conferência de valor desligada, pagamento em modo real aceito, bloqueio da
+consulta removido no webhook, expiração sem reler o estado.
+
+**370 testes passando**; teste de carga ainda 30 de 30 nas três fases.
+
+**Pendente para a parte B**, que depende das contas: a terceira trava de
+sandbox (recusar subir com credencial de conta real, se a API do Mercado Pago
+permitir distinguir), e a validação da assinatura contra uma notificação real,
+que substitui a documentação que não pôde ser lida.
+
+---
+
+## 19/09/2026 — Revisão local da parte A, e a API no GitHub
+
+Revisão da parte A com dez achados, todos corrigidos. Uma ressalva de método
+primeiro: os três revisores independentes que eu tinha disparado morreram no
+limite de uso da conta, e a revisão acabou sendo feita só por mim — quem
+escreveu o código revisando o próprio código, com os mesmos pontos cegos. Nas
+etapas 6 e 7, foram justamente os revisores independentes que acharam o que eu
+não tinha visto. Fica registrado como limitação desta revisão.
+
+**O achado mais sério não era um defeito de código, e sim uma lacuna do
+modelo.** Cancelar uma consulta JÁ PAGA encerrava o checkout aberto, devolvia o
+horário e não dizia nada sobre o dinheiro recebido: a consulta sumia da agenda
+e nenhum registro indicava que havia estorno a fazer. Agora cada pagamento
+aprovado da consulta cancelada vira uma linha de auditoria
+`pagamento.estorno_pendente`, na mesma transação. Estorno automático continua
+fora do escopo; o que não podia é o caso ficar invisível.
+
+**Duas afirmações minhas estavam erradas no texto.** O README dizia que "o
+banco recusa pagamento fora do sandbox". Não recusa: a restrição do banco só
+impede gravar a palavra 'producao' na coluna de ambiente, e nada no código
+escreve outro valor ali. Quem de fato barra um pagamento real é a verificação
+do webhook. O texto foi corrigido, e a restrição do banco passou a ser
+descrita pelo que é — segunda linha de defesa contra escrita manual.
+
+**O teste da trava aceitava qualquer sessão bloqueada.** Ele esperava o banco
+mostrar *alguma* sessão parada aguardando bloqueio — o que outra execução da
+suíte, ou uma conexão deixada para trás, satisfaria sozinha, liberando o teste
+antes de o webhook chegar ao ponto crítico. Agora usa `pg_blocking_pids` e
+exige que o bloqueado esteja travado **pela transação do próprio teste**. É o
+mesmo tipo de fragilidade que já nos enganou seis vezes, desta vez pego antes
+de enganar.
+
+Outras correções: reversão de pagamento aprovado (estorno ou contestação)
+passou a ser registrada como anomalia, em vez de mudar o status em silêncio; a
+anomalia não é mais gravada de novo a cada reenvio da mesma notificação; o
+checkout sem endereço de pagamento falha na hora, em vez de gravar um checkout
+impagável; o tipo do evento no webhook passou a ser lido só da query, que é a
+parte assinada; a subida avisa quando há credencial do Mercado Pago sem URL
+pública; e o desligamento, que não tinha teste nenhum, ganhou um que sobe o
+processo de verdade e manda SIGTERM — pulado no Windows, que não tem sinais
+POSIX, e executado na integração contínua, que é Linux como o Render.
+
+Cada correção foi confirmada reintroduzindo o defeito: cinco defeitos, sete
+testes reprovados, nenhum outro.
+
+**Primeira publicação no GitHub.** O repositório é público, como decidido. Antes
+do envio, varredura do histórico inteiro: nenhuma credencial, nenhuma string de
+conexão real — as duas ocorrências marcadas eram o nome do cabeçalho
+`x-signature` no código e a senha `postgres` do banco descartável da integração
+contínua. E a integração contínua, que existia desde a Etapa 3 e nunca tinha
+rodado de verdade, passou de primeira nas duas branches — incluindo o teste de
+carga da Seção 4.5 contra um PostgreSQL local, um regime bem diferente do
+nosso.
+
+O serviço do Render passou a ser descrito no próprio repositório
+(`render.yaml`), sem segredo nenhum: as sete variáveis sensíveis são pedidas no
+painel. Região Virginia, porque o plano gratuito não tem região no Brasil — cada
+ida ao banco em São Paulo passa a custar por volta de 120 ms, contra 56 ms
+medidos localmente, e isso precisa constar do capítulo de resultados.
+
+**378 testes passando**, um pulado no Windows.
+
+---
