@@ -43,7 +43,16 @@ function criarRotasDeWebhook({ gateway, segredo, pagamentos = new RepositorioDeP
       if (!verificacao.valida) {
         // O motivo vai para o log, não para a resposta: quem está forjando não
         // precisa saber o que corrigir.
-        console.warn(`Webhook do Mercado Pago recusado: ${verificacao.motivo}`);
+        //
+        // Junto vão os NOMES dos parâmetros da query. Sem eles, `dados_ausentes`
+        // diz que faltou `data.id` e não diz o que veio no lugar — e é essa
+        // diferença que distingue uma notificação noutro formato (o IPN antigo
+        // usa `topic` e `id`) de uma requisição forjada. Nomes, nunca valores.
+        console.warn(
+          `Webhook do Mercado Pago recusado: ${verificacao.motivo}; ` +
+            `parâmetros na query: ${Object.keys(req.query).join(', ') || '(nenhum)'}; ` +
+            `assinatura ${req.get('x-signature') ? 'presente' : 'ausente'}`
+        );
         return res.status(401).json({
           erro: { codigo: 'ASSINATURA_INVALIDA', mensagem: 'Notificação sem assinatura válida.', acao: null },
         });

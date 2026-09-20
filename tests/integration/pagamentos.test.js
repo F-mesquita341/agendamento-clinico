@@ -397,6 +397,22 @@ describe('POST /webhooks/mercadopago', () => {
       expect(texto).toMatch(/consulta_confirmada/);
     });
 
+    test('a recusa diz o motivo e o que veio na query', async () => {
+      // Foi o que faltou no primeiro portão contra a API publicada: o log
+      // dizia `dados_ausentes` sem dizer o que havia chegado no lugar de
+      // `data.id`, e sem isso não dá para distinguir outro formato de
+      // notificação de uma requisição forjada.
+      const { referencia } = await comCheckout();
+      const pagamento = gateway.pagar(referencia);
+
+      await notificar(pagamento.id, { segredo: 'chave-errada' });
+
+      const texto = avisos.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(texto).toMatch(/recusado: assinatura_nao_confere/);
+      expect(texto).toMatch(/data\.id/);
+      expect(texto).toMatch(/assinatura presente/);
+    });
+
     test('a anomalia aparece no registro junto do desfecho', async () => {
       const { referencia } = await comCheckout();
       const pagamento = gateway.pagar(referencia, { valorCentavos: 100 });
