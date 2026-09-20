@@ -397,6 +397,28 @@ describe('POST /webhooks/mercadopago', () => {
       expect(texto).toMatch(/consulta_confirmada/);
     });
 
+    test('a notificação no formato IPN antigo é reconhecida e ignorada', async () => {
+      // O Mercado Pago entrega o mesmo evento duas vezes: `type`+`data.id` e o
+      // IPN `topic`+`id`. Observado em produção, no portão da Etapa 8. Antes,
+      // o IPN levava 401 e era reenviado em rajada — cinco por pagamento.
+      const { consulta, referencia } = await comCheckout();
+      const pagamento = gateway.pagar(referencia);
+
+      const r = await request(servidor)
+        .post(`/webhooks/mercadopago?id=${pagamento.id}&topic=payment`)
+        .set('x-request-id', crypto.randomUUID())
+        .set('x-signature', 'ts=1,v1=00')
+        .send({ topic: 'payment', resource: pagamento.id });
+
+      expect(r.status).toBe(200);
+      // Reconhecer não é processar: o estado não muda por um formato que a API
+      // não implementa e cuja assinatura ela não sabe conferir.
+      expect(await estado(consulta.id)).toMatchObject({ status: 'pendente_pagamento' });
+      const texto = registros.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(texto).toMatch(/IPN ignorado/);
+      expect(texto).toMatch(/topic=payment/);
+    });
+
     test('a recusa diz o motivo e o que veio na query', async () => {
       // Foi o que faltou no primeiro portão contra a API publicada: o log
       // dizia `dados_ausentes` sem dizer o que havia chegado no lugar de

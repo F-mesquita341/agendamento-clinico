@@ -33,6 +33,24 @@ function criarRotasDeWebhook({ gateway, segredo, pagamentos = new RepositorioDeP
       // e então não serve.
       const idDoDado = typeof req.query['data.id'] === 'string' ? req.query['data.id'] : undefined;
 
+      // O Mercado Pago entrega o MESMO evento duas vezes: no formato atual,
+      // com `data.id` e `type`, e no IPN antigo, com `topic` e `id`. A API
+      // implementa o primeiro — é o que traz o id do pagamento no manifesto
+      // assinado. O segundo não acrescenta nada.
+      //
+      // Responder 200 é reconhecer o recebimento de algo que não vamos tratar,
+      // como já é feito com eventos de outro tipo. Antes era 401, e o provedor
+      // reenviava em rajada: carga inútil numa instância gratuita, e a
+      // integração aparecendo com taxa de erro alta no painel dele, por um
+      // formato que escolhemos não implementar.
+      if (idDoDado === undefined && typeof req.query.topic === 'string') {
+        console.log(
+          `Webhook do Mercado Pago: formato IPN ignorado (topic=${req.query.topic}) — ` +
+            'o formato atual traz o mesmo evento'
+        );
+        return res.status(200).json({ recebido: true });
+      }
+
       const verificacao = verificarAssinatura({
         cabecalhoAssinatura: req.get('x-signature'),
         idDaRequisicao: req.get('x-request-id'),

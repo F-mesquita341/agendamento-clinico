@@ -1113,3 +1113,81 @@ classificação.
 
 Nenhum outro pacote de desenvolvimento é usado fora dos testes — `jest` e
 `supertest` continuam onde estavam.
+
+## 20/09/2026 — A API no ar, e o portão da Etapa 8 atingido
+
+A API está publicada no Render e o portão foi atingido contra o Mercado Pago
+real em sandbox: um pagamento aprovado confirmou a consulta **pelo webhook**,
+em 27 segundos, e uma notificação forjada foi recusada com 401. A fase da
+reserva abandonada ficou para depois.
+
+Quatro obstáculos no caminho, e os três primeiros valem registro porque nenhum
+era defeito de lógica — eram suposições minhas sobre o ambiente.
+
+**O primeiro deploy morreu por classificação de dependência.** O `render.yaml`
+define `NODE_ENV=production`, e nesse modo o `npm ci` omite as
+devDependencies — onde estava o `node-pg-migrate`, que o comando de início usa.
+`NODE_ENV=production npm ci --dry-run` imprime `remove node-pg-migrate 9.0.0`,
+que é a prova direta. Enquanto migração era coisa de máquina local, ele era
+mesmo dependência de desenvolvimento; desde que o start em produção roda
+migrations, deixou de ser. `devDependencies` não quer dizer "ferramenta", quer
+dizer "a aplicação não precisa disso para rodar".
+
+**O segundo morreu por variáveis que nunca chegaram a existir.** Os seis campos
+`sync: false` do formulário do Blueprint saíram vazios, e o Render não criou as
+variáveis. A configuração verifica em sequência e para na primeira que falta,
+então seriam quatro deploys falhando em fila — banco, Firebase, pagamento. A
+aba Environment é a fonte da verdade, não o formulário.
+
+**O terceiro foi o webhook, e é o mais instrutivo.** As notificações chegavam e
+eram recusadas com `assinatura_nao_confere`, apesar de a simulação do painel
+responder 200. A explicação estava na carga da simulação: `user_id: 350882149`
+— a conta pessoal —, enquanto o token da API é
+`APP_USR-4815737873672952-...-3699720609`, da conta de teste vendedora. **As
+notificações de um pagamento saem da aplicação que criou o checkout, assinadas
+com a chave dela.** O webhook estava configurado noutra aplicação. A simulação
+passava porque era disparada justamente pela aplicação certa para aquela chave
+— um teste que confirmava a si mesmo, exatamente o vício que este trabalho
+persegue desde a Etapa 5. Corrigido entrando no Mercado Pago **como a conta de
+teste**, numa janela anônima, e configurando o webhook na aplicação dela.
+
+**E um resultado que não estava no roteiro: a reconciliação foi exercitada por
+um defeito real.** Enquanto o webhook estava quebrado, o pagamento foi feito e
+a API não soube. Ao vencer a reserva, a rotina perguntou ao Mercado Pago se
+havia pagamento com aquela referência, achou o aprovado e **confirmou em vez de
+expirar** — 57 segundos depois do vencimento, coerente com o intervalo de um
+minuto. A rede de proteção tinha sido desenhada para o aviso perdido por causa
+da hibernação do plano gratuito; ela pegou um aviso perdido de verdade, por
+outro motivo. Vale mais que um ensaio encenado.
+
+A distinção entre os dois caminhos não depende de cronômetro: a reconciliação
+só age sobre reservas JÁ VENCIDAS, então confirmação dentro do prazo só pode
+ter vindo do webhook. A auditoria registra o ator — `webhook` num caso,
+`sistema` no outro —, e foi assim que os dois ficaram documentados no mesmo
+banco de produção.
+
+Números medidos, para o capítulo de resultados: latência ao banco de **115 ms**
+do Render contra 56 ms de Quixadá; confirmação por webhook em **27 s**; por
+reconciliação, **57 s após o vencimento**. E a limitação de fundo: no plano
+gratuito o serviço hiberna, e com ele a rotina de expiração.
+
+**O quarto obstáculo foi resolvido pelo log, que é o motivo de ele existir.**
+Chegavam também notificações recusadas com `dados_ausentes`, cinco por
+pagamento, reenviadas em rajada. A linha nova disse o que eram:
+
+    recusado: dados_ausentes; parâmetros na query: id, topic; assinatura presente
+
+`id` e `topic` — o formato IPN antigo. O Mercado Pago entrega o MESMO evento
+duas vezes, no formato atual e no legado, e a API implementa só o primeiro, que
+é o que traz o id do pagamento no manifesto assinado. O segundo não acrescenta
+nada. Agora ele é reconhecido e respondido com 200, como já se fazia com
+eventos de outro tipo: reconhecer o recebimento de algo que não vamos tratar. O
+401 anterior fazia o provedor reenviar sem parar — carga inútil numa instância
+gratuita e taxa de erro alta no painel dele, por um formato que escolhemos não
+implementar.
+
+Vale reparar no método. Eu tinha uma hipótese plausível (IPN) desde o primeiro
+sintoma, e **não** a implementei: escrevi o log primeiro e esperei o fato. Foi
+o oposto do que aconteceu com a trava do `live_mode`, que nasceu de uma
+suposição sobre o comportamento do provedor e sobreviveu até a primeira
+ligação real. Duas semanas atrás isso teria virado um `if` adivinhado.

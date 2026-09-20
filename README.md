@@ -277,6 +277,53 @@ referência aleatória e o prazo. Nada do paciente.
 | `PAGAMENTO_INDISPONIVEL` (503, `tentar_novamente`) | O Mercado Pago não respondeu, ou não está configurado |
 | `ASSINATURA_INVALIDA` (401) | Aviso sem assinatura válida no webhook |
 
+## Publicação
+
+A API roda no Render, descrita por [`render.yaml`](render.yaml) — plano,
+região, rota de saúde e comando de início ficam no repositório, e só os
+segredos são preenchidos no painel. O banco continua no Neon e a autenticação
+no Firebase; o Render hospeda apenas o processo Node.
+
+O serviço é criado por **Blueprints → New Blueprint Instance**, apontando para
+este repositório. O painel pede as seis variáveis marcadas `sync: false`:
+`DATABASE_URL`, as três `FIREBASE_*` e as duas `MERCADO_PAGO_*`. As migrations
+rodam antes de a porta abrir (`npm run migrate && npm start`), porque uma
+publicação com migration pendente não pode subir pela metade.
+
+**O webhook precisa ser configurado na aplicação DONA da credencial.** Um
+Access Token do Mercado Pago tem a forma
+`APP_USR-<aplicação>-<data>-<segredo>-<conta>`. As notificações de um pagamento
+saem da aplicação que criou o checkout e são assinadas com a chave **dela**.
+Configurar o webhook noutra aplicação — a da sua conta pessoal, por exemplo —
+faz a simulação do painel passar e todo pagamento real falhar com
+`assinatura_nao_confere`, porque a simulação é disparada pela aplicação certa
+para aquela chave. Para usar uma conta de teste vendedora, entre no Mercado
+Pago **como ela**, numa janela anônima, e configure o webhook na aplicação que
+aparece lá.
+
+**Limitações do plano gratuito**, que precisam constar dos resultados:
+
+- O serviço hiberna depois de 15 minutos parado; a primeira requisição depois
+  disso leva perto de um minuto.
+- A rotina de expiração só roda com a API acordada. A reconciliação cobre o
+  aviso perdido, mas as sessões de teste devem começar acordando o serviço.
+- Não há região no Brasil. De Virginia, cada ida ao banco custa **115 ms**
+  medidos, contra 56 ms de uma máquina local em Quixadá — os tempos da API
+  publicada não são comparáveis aos do teste de concorrência local.
+
+Para verificar a publicação ponta a ponta, com pagamento real em sandbox:
+
+```bash
+npm run verificar:portao
+```
+
+Ele agenda com token real do Firebase, abre o checkout, espera você pagar e
+confere a confirmação. **Como ele distingue webhook de reconciliação:** a
+reconciliação só age sobre reservas já vencidas, então confirmação enquanto a
+reserva ainda está no prazo só pode ter vindo do webhook. É critério de estado,
+não cronômetro. Com `-- --expiracao`, verifica também que a reserva abandonada
+devolve o horário à grade.
+
 ## Teste de concorrência
 
 O critério objetivo do projeto (Seção 4.5) é **zero conflitos** com cem
