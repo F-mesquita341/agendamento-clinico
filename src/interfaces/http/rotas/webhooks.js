@@ -49,8 +49,11 @@ function criarRotasDeWebhook({ gateway, segredo, pagamentos = new RepositorioDeP
         });
       }
 
-      const tipo = req.query.type ?? req.body?.type;
-      if (tipo !== 'payment') {
+      // Só a query: o corpo NÃO entra no manifesto assinado, e decidir por ele
+      // contrariaria a regra que esta rota existe para cumprir. Uma notificação
+      // assinada de outro evento, reenviada com o corpo trocado, seria aceita
+      // como pagamento.
+      if (req.query.type !== 'payment') {
         return res.status(200).json({ recebido: true });
       }
 

@@ -126,10 +126,14 @@ class GatewayMercadoPago extends GatewayDePagamento {
     }
 
     const json = await resposta.json();
-    return {
-      preferenciaId: String(json.id),
-      checkoutUrl: json.init_point ?? json.sandbox_init_point,
-    };
+    const checkoutUrl = json.init_point ?? json.sandbox_init_point;
+    if (!checkoutUrl) {
+      // Sem endereço não há pagamento possível. Falhar aqui evita gravar um
+      // checkout "aberto" que ninguém consegue pagar e que ainda bloqueia
+      // novas tentativas até a reserva expirar.
+      throw new Error('Mercado Pago criou o checkout sem endereço de pagamento.');
+    }
+    return { preferenciaId: String(json.id), checkoutUrl };
   }
 
   async consultarPagamento(id) {

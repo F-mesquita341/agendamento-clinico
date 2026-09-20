@@ -43,6 +43,15 @@ if (config.credencialFirebase) {
 const gateway = criarGatewayDePagamento();
 if (!config.MERCADO_PAGO_ACCESS_TOKEN) {
   console.warn('Aviso: Mercado Pago não configurado. POST /consultas/:id/pagamento vai responder 503.');
+} else if (!config.urlPublica) {
+  // Com credencial e sem endereço público, o checkout é criado sem para onde
+  // avisar: o pagamento acontece e a consulta fica aguardando até a
+  // reconciliação alcançá-la. Melhor dizer isso na subida do que deixar
+  // alguém diagnosticar "o pagamento não confirma".
+  console.warn(
+    'Aviso: sem URL_PUBLICA (nem RENDER_EXTERNAL_URL). Os checkouts serão criados sem\n' +
+      'endereço de notificação: a confirmação dependerá da reconciliação, que roda a cada minuto.'
+  );
 }
 
 const app = criarApp({ verificarToken, gateway });

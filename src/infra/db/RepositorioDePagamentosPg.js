@@ -139,13 +139,30 @@ class RepositorioDePagamentosPg extends RepositorioDePagamentos {
       });
 
       if (efeito.anomalia) {
-        await auditar(cliente, {
-          atorTipo: ator,
-          acao: 'pagamento.anomalia',
-          entidade: 'consulta',
-          entidadeId: consultaId,
-          detalhe: { anomalia: efeito.anomalia, pagamentoExterno: pagamento.id, status: pagamento.status },
-        });
+        // O provedor reenvia a mesma notificação até receber 200, e há
+        // anomalias que nunca chegam a virar linha de pagamento — a de modo
+        // real, por exemplo. Sem esta conferência, cada reenvio gravaria a
+        // mesma anomalia de novo, e a auditoria cresceria com repetições do
+        // mesmo fato.
+        const { rowCount: jaRegistrada } = await cliente.query(
+          `SELECT 1 FROM auditoria
+            WHERE acao = 'pagamento.anomalia'
+              AND entidade = 'consulta'
+              AND entidade_id = $1
+              AND detalhe->>'pagamentoExterno' = $2
+              AND detalhe->>'anomalia' = $3
+            LIMIT 1`,
+          [consultaId, pagamento.id, efeito.anomalia]
+        );
+        if (!jaRegistrada) {
+          await auditar(cliente, {
+            atorTipo: ator,
+            acao: 'pagamento.anomalia',
+            entidade: 'consulta',
+            entidadeId: consultaId,
+            detalhe: { anomalia: efeito.anomalia, pagamentoExterno: pagamento.id, status: pagamento.status },
+          });
+        }
       }
 
       if (efeito.acao === 'ignorar') {

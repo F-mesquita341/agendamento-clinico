@@ -263,6 +263,24 @@ async function cancelarSobBloqueio(cliente, consulta, { motivo, atorTipo, atorId
     [atorTipo, atorId, acao, consulta.id, { horarioId: consulta.horarioId, horarioLiberado: liberado }]
   );
 
+  // Cancelar uma consulta JÁ PAGA deixa dinheiro recebido sem contrapartida.
+  // O estorno automático está fora do escopo do trabalho, mas o caso não pode
+  // sumir: cada pagamento aprovado vira uma linha de auditoria dizendo que há
+  // estorno a fazer. Sem isto, o cancelamento de uma consulta paga não deixava
+  // rastro nenhum.
+  const { rows: aprovados } = await cliente.query(
+    `SELECT id, pagamento_externo_id FROM pagamento
+      WHERE consulta_id = $1 AND status = 'aprovado'`,
+    [consulta.id]
+  );
+  for (const pagamento of aprovados) {
+    await cliente.query(
+      `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
+       VALUES ($1, $2, 'pagamento.estorno_pendente', 'pagamento', $3, $4)`,
+      [atorTipo, atorId, pagamento.id, { consultaId: consulta.id, motivo, pagamentoExterno: pagamento.pagamento_externo_id }]
+    );
+  }
+
   return paraConsulta(rows[0]);
 }
 

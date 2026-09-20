@@ -147,6 +147,26 @@ describe('decidirEfeitoDoPagamento', () => {
     }
   );
 
+  test.each([
+    ['estornado', STATUS_PAGAMENTO.ESTORNADO],
+    ['contestado, que o provedor reporta como pendente', STATUS_PAGAMENTO.PENDENTE],
+  ])('pagamento aprovado que vira %s é registrado como anomalia', (_rotulo, status) => {
+    // A consulta segue confirmada e ocupando o horário, sem pagamento válido.
+    // Estorno automático está fora de escopo; ficar em silêncio, não.
+    const efeito = decidirEfeitoDoPagamento({
+      consulta: consultaEm(STATUS_CONSULTA.CONFIRMADA),
+      pagamento: aprovado({ status }),
+      statusAnterior: STATUS_PAGAMENTO.APROVADO,
+    });
+
+    expect(efeito).toMatchObject({
+      acao: 'registrar',
+      statusDoPagamento: status,
+      confirmarConsulta: false,
+      anomalia: 'pagamento_revertido',
+    });
+  });
+
   test('recusado e depois aprovado no mesmo checkout: a aprovação confirma', () => {
     // O Mercado Pago deixa tentar de novo no mesmo checkout, com outro cartão.
     const efeito = decidirEfeitoDoPagamento({

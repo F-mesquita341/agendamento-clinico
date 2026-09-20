@@ -70,7 +70,12 @@ function decidirEfeitoDoPagamento({ consulta, pagamento, statusAnterior }) {
   }
 
   if (pagamento.status !== STATUS.APROVADO) {
-    return registrar(false, null);
+    // Um pagamento que ESTAVA aprovado e deixou de estar — estorno, ou
+    // contestação, que o provedor reporta como pendente. A consulta continua
+    // confirmada, ocupando o horário, mas sem pagamento válido por trás: é
+    // caso para alguém olhar, não para mudança automática de estado.
+    const revertido = statusAnterior === STATUS.APROVADO;
+    return registrar(false, revertido ? 'pagamento_revertido' : null);
   }
 
   if (consulta.status === STATUS_CONSULTA.PENDENTE_PAGAMENTO) {

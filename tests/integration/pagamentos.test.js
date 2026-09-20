@@ -82,8 +82,11 @@ function notificar(pagamentoId, { segredo = SEGREDO, tipo = 'payment', estragar 
     .update(`id:${partes.idAssinado.toLowerCase()};request-id:${partes.requisicao};ts:${partes.ts};`)
     .digest('hex');
 
+  const query = partes.semTipoNaQuery
+    ? `data.id=${encodeURIComponent(partes.idNaQuery)}`
+    : `data.id=${encodeURIComponent(partes.idNaQuery)}&type=${tipo}`;
   const pedido = request(servidor)
-    .post(`/webhooks/mercadopago?data.id=${encodeURIComponent(partes.idNaQuery)}&type=${tipo}`)
+    .post(`/webhooks/mercadopago?${query}`)
     .set('x-request-id', partes.requisicao);
   if (partes.semAssinatura !== true) pedido.set('x-signature', `ts=${partes.ts},v1=${v1}`);
   return pedido.send({ action: 'payment.updated', type: tipo, data: { id: String(pagamentoId) } });
@@ -117,21 +120,31 @@ async function auditoria(acao) {
 }
 
 /**
- * Espera até alguma sessão deste banco estar parada aguardando um bloqueio.
- * É o que torna determinístico o teste da trava: nada de dormir um tempo e
- * torcer para o outro lado ter chegado lá.
+ * Espera até alguém estar bloqueado PELA transação do teste.
+ *
+ * `pg_blocking_pids` diz quem está travando quem: sem isso, bastaria outra
+ * sessão qualquer do banco esperar um bloqueio — outra execução da suíte, uma
+ * conexão deixada para trás — para o teste seguir adiante cedo demais e deixar
+ * de provar justamente a trava que ele existe para provar.
  */
-async function esperarAlguemBloqueado(prazoMs = 15_000) {
+async function esperarBloqueioPor(pidDoTeste, prazoMs = 15_000) {
   const limite = Date.now() + prazoMs;
   while (Date.now() < limite) {
     const { rows } = await consultar(
       `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock'`
+        WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+      [pidDoTeste]
     );
     if (rows[0].n > 0) return;
     await new Promise((resolver) => setTimeout(resolver, 50));
   }
-  throw new Error('Nenhuma sessão ficou esperando o bloqueio.');
+  throw new Error('Ninguém ficou esperando o bloqueio da transação do teste.');
+}
+
+/** O identificador da sessão de um cliente, para saber quem ela está travando. */
+async function pidDe(cliente) {
+  const { rows } = await cliente.query('SELECT pg_backend_pid() AS pid');
+  return rows[0].pid;
 }
 
 async function vencer(consultaId, minutosAtras = 1) {
@@ -350,6 +363,62 @@ describe('POST /webhooks/mercadopago', () => {
     expect((await pagamentosDa(consulta.id)).map((p) => p.status)).toEqual(['recusado', 'aprovado']);
   });
 
+  test('tipo de evento só vale vindo da query, que é a parte assinada', async () => {
+    // O corpo não entra no manifesto da assinatura. Uma notificação assinada de
+    // outro evento, reenviada com o corpo trocado para "payment", não pode ser
+    // tratada como pagamento.
+    const { consulta, referencia } = await comCheckout();
+    const pagamento = gateway.pagar(referencia);
+
+    const r = await notificar(pagamento.id, { estragar: (p) => ({ ...p, semTipoNaQuery: true }) });
+
+    expect(r.status).toBe(200);
+    expect(await estado(consulta.id)).toMatchObject({ status: 'pendente_pagamento' });
+  });
+
+  test('anomalia repetida não vira duas linhas de auditoria', async () => {
+    // O Mercado Pago reenvia até receber 200. Pagamento em modo real nunca
+    // vira linha de pagamento, então não há status anterior para comparar: sem
+    // cuidado, cada reenvio gravaria a mesma anomalia de novo.
+    const { referencia } = await comCheckout();
+    const pagamento = gateway.pagar(referencia, { modoReal: true });
+
+    await notificar(pagamento.id);
+    await notificar(pagamento.id);
+
+    expect(await auditoria('pagamento.anomalia')).toHaveLength(1);
+  });
+
+  test('segundo pagamento aprovado para a mesma consulta vira linha própria e anomalia', async () => {
+    const { consulta, referencia } = await comCheckout();
+    await notificar(gateway.pagar(referencia).id);
+    const segundo = gateway.pagar(referencia);
+
+    await notificar(segundo.id);
+
+    expect(await estado(consulta.id)).toMatchObject({ status: 'confirmada' });
+    const pagamentos = await pagamentosDa(consulta.id);
+    expect(pagamentos.map((p) => p.status)).toEqual(['aprovado', 'aprovado']);
+    expect(pagamentos[1].pagamento_externo_id).toBe(segundo.id);
+    expect((await auditoria('pagamento.anomalia'))[0].detalhe.anomalia).toBe('pagamento_duplicado');
+  });
+
+  test('estorno depois da confirmação fica registrado como anomalia', async () => {
+    const { consulta, referencia } = await comCheckout();
+    const pagamento = gateway.pagar(referencia);
+    await notificar(pagamento.id);
+
+    // O mesmo pagamento, agora estornado no provedor.
+    gateway.pagamentos.get(pagamento.id).status = 'estornado';
+    await notificar(pagamento.id);
+
+    // A consulta não muda sozinha — o horário já foi combinado —, mas o caso
+    // não fica invisível.
+    expect(await estado(consulta.id)).toMatchObject({ status: 'confirmada' });
+    expect((await pagamentosDa(consulta.id))[0].status).toBe('estornado');
+    expect((await auditoria('pagamento.anomalia'))[0].detalhe.anomalia).toBe('pagamento_revertido');
+  });
+
   test('provedor fora do ar na consulta do pagamento é 503 — o Mercado Pago reenviará', async () => {
     const { referencia } = await comCheckout();
     const pagamento = gateway.pagar(referencia);
@@ -439,6 +508,25 @@ describe('expiração de reservas', () => {
     expect((await auditoria('pagamento.anomalia'))[0].detalhe.anomalia).toBe('pagamento_apos_cancelamento');
   });
 
+  test('cancelar uma consulta JÁ PAGA deixa registrado que há estorno a fazer', async () => {
+    // Estorno automático está fora do escopo do trabalho. O que não pode é o
+    // dinheiro ficar sem rastro: a consulta some da agenda e nada diria que
+    // houve pagamento recebido por ela.
+    const consulta = await agendada();
+    await pedirPagamento(comoA, consulta.id);
+    const pagamento = gateway.pagar(referenciaDoUltimoCheckout());
+    await notificar(pagamento.id);
+
+    await request(servidor).patch(`/consultas/${consulta.id}/cancelamento`).set(comoA);
+
+    expect(await estado(consulta.id)).toMatchObject({ status: 'cancelada', motivo_cancelamento: 'paciente' });
+    const estornos = await auditoria('pagamento.estorno_pendente');
+    expect(estornos).toHaveLength(1);
+    expect(estornos[0].detalhe).toMatchObject({ consultaId: consulta.id, pagamentoExterno: pagamento.id });
+    // O pagamento continua aprovado: quem estorna é uma pessoa, no painel.
+    expect((await pagamentosDa(consulta.id))[0].status).toBe('aprovado');
+  });
+
   test('cancelamento pelo paciente grava o motivo e encerra o checkout', async () => {
     const consulta = await agendada();
     await pedirPagamento(comoA, consulta.id);
@@ -463,6 +551,7 @@ describe('expiração de reservas', () => {
     let aplicacao;
     try {
       await expiracao.query('BEGIN');
+      const pidDaExpiracao = await pidDe(expiracao);
       await expiracao.query('SELECT id FROM consulta WHERE id = $1 FOR UPDATE', [consulta.id]);
       await expiracao.query(
         "UPDATE consulta SET status = 'cancelada', motivo_cancelamento = 'reserva_expirada' WHERE id = $1",
@@ -479,7 +568,7 @@ describe('expiração de reservas', () => {
 
       // O aviso de pagamento chega agora, com a expiração ainda sem COMMIT.
       aplicacao = new RepositorioDePagamentosPg().aplicarPagamento(pagamento, { ator: 'webhook' });
-      await esperarAlguemBloqueado();
+      await esperarBloqueioPor(pidDaExpiracao);
       await expiracao.query('COMMIT');
     } catch (erro) {
       await expiracao.query('ROLLBACK').catch(() => {});
@@ -507,11 +596,12 @@ describe('expiração de reservas', () => {
     let expiracao;
     try {
       await confirmacao.query('BEGIN');
+      const pidDaConfirmacao = await pidDe(confirmacao);
       await confirmacao.query('SELECT id FROM consulta WHERE id = $1 FOR UPDATE', [consulta.id]);
       await confirmacao.query("UPDATE consulta SET status = 'confirmada' WHERE id = $1", [consulta.id]);
 
       expiracao = new RepositorioDeConsultasPg().expirarSeVencida(consulta.id, new Date());
-      await esperarAlguemBloqueado();
+      await esperarBloqueioPor(pidDaConfirmacao);
       await confirmacao.query('COMMIT');
     } catch (erro) {
       await confirmacao.query('ROLLBACK').catch(() => {});

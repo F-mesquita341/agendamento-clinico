@@ -90,6 +90,14 @@ describe('criarCheckout', () => {
     expect(fetch.chamadas[0].corpo).not.toHaveProperty('notification_url');
   });
 
+  test('checkout criado sem endereço de pagamento falha na hora', async () => {
+    // Gravar um checkout "aberto" sem URL bloquearia novas tentativas até a
+    // reserva expirar, e o paciente receberia uma tela de pagamento vazia.
+    const { g } = gateway([{ status: 201, json: { id: 'pref-9' } }]);
+
+    await expect(g.criarCheckout(CHECKOUT)).rejects.toThrow(/sem endereço de pagamento/);
+  });
+
   test('credencial recusada é erro de configuração, não indisponibilidade', async () => {
     const { g } = gateway([{ status: 401, json: {} }]);
 
