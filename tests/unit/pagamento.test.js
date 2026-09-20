@@ -70,18 +70,28 @@ describe('decidirEfeitoDoPagamento', () => {
     expect(efeito.anomalia).toBeNull();
   });
 
-  test('pagamento em modo real é ignorado e registrado como anomalia — só sandbox', () => {
-    const efeito = decidirEfeitoDoPagamento({
+  test('o modo relatado pelo provedor não decide nada', () => {
+    // Esta função já recusou pagamento com modo real, supondo que isso
+    // significasse "fora do sandbox". Não significa: pagamento com credencial
+    // de conta de TESTE, cartão de teste e dinheiro fictício volta do Mercado
+    // Pago com live_mode verdadeiro, porque a conta de teste opera em modo
+    // produção. A trava recusaria todo pagamento legítimo do trabalho.
+    //
+    // A garantia de sandbox passou a ser feita na subida da API, conferindo de
+    // quem é a credencial — ver tests/unit/travaDeSandbox.test.js.
+    const comModoReal = decidirEfeitoDoPagamento({
       consulta: consultaEm(STATUS_CONSULTA.PENDENTE_PAGAMENTO),
       pagamento: aprovado({ modoReal: true }),
       statusAnterior: null,
     });
-
-    expect(efeito).toMatchObject({
-      acao: 'ignorar',
-      confirmarConsulta: false,
-      anomalia: 'pagamento_em_modo_real',
+    const semModoReal = decidirEfeitoDoPagamento({
+      consulta: consultaEm(STATUS_CONSULTA.PENDENTE_PAGAMENTO),
+      pagamento: aprovado({ modoReal: false }),
+      statusAnterior: null,
     });
+
+    expect(comModoReal).toEqual(semModoReal);
+    expect(comModoReal.confirmarConsulta).toBe(true);
   });
 
   test.each([

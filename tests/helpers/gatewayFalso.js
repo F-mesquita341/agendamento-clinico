@@ -29,6 +29,8 @@ class GatewayFalso extends GatewayDePagamento {
     // Esconde os pagamentos da busca por referência — para testar o webhook
     // sozinho, sem que a reconciliação o encontre antes.
     this.ocultarNaBusca = false;
+    // A trava de sandbox pergunta isto na subida da API.
+    this.contaDeTeste = true;
   }
 
   verificarDisponivel() {
@@ -51,6 +53,16 @@ class GatewayFalso extends GatewayDePagamento {
     this.verificarDisponivel();
     if (this.ocultarNaBusca) return [];
     return [...this.pagamentos.values()].filter((p) => p.referencia === referencia);
+  }
+
+  async descreverConta() {
+    this.verificarDisponivel();
+    return {
+      id: '3699720609',
+      apelido: 'TESTUSER0000000000',
+      siteId: 'MLB',
+      ehContaDeTeste: this.contaDeTeste,
+    };
   }
 
   /** O paciente pagou no checkout desta referência. */

@@ -156,6 +156,29 @@ class GatewayMercadoPago extends GatewayDePagamento {
     const json = await resposta.json();
     return (json.results ?? []).map(paraPagamento);
   }
+
+  /**
+   * De quem é a credencial. `GET /users/me` devolve a conta inteira — inclusive
+   * e-mail, nome e documento do titular —, e nada disso é lido: só o que a
+   * trava de sandbox precisa saber.
+   *
+   * O sinal de conta de teste é a tag `test_user`, que o próprio Mercado Pago
+   * põe nas contas criadas pelo painel de contas de teste. É o que resta de
+   * confiável depois de `live_mode` se mostrar inútil para isso.
+   */
+  async descreverConta() {
+    const resposta = await this.requisitar('GET', '/users/me');
+    if (!resposta.ok) {
+      throw new Error(`Mercado Pago recusou a identificação da conta: HTTP ${resposta.status}`);
+    }
+    const json = await resposta.json();
+    return {
+      id: String(json.id),
+      apelido: json.nickname ?? null,
+      siteId: json.site_id ?? null,
+      ehContaDeTeste: Array.isArray(json.tags) && json.tags.includes('test_user'),
+    };
+  }
 }
 
 /**
@@ -173,6 +196,10 @@ class GatewayNaoConfigurado extends GatewayDePagamento {
   }
 
   async pagamentosDaReferencia() {
+    throw new PagamentoIndisponivel('O pagamento não está configurado neste ambiente.');
+  }
+
+  async descreverConta() {
     throw new PagamentoIndisponivel('O pagamento não está configurado neste ambiente.');
   }
 }

@@ -184,6 +184,96 @@ describe('consultarPagamento', () => {
   });
 });
 
+describe('descreverConta', () => {
+  // O payload é o que o Mercado Pago devolveu de verdade para a conta de teste
+  // do trabalho, reduzido aos campos que importam. Os demais — e-mail, nome,
+  // documento do titular — existem na resposta e não são lidos.
+  const RESPOSTA = {
+    id: 3699720609,
+    nickname: 'TESTUSER3774910712453320476',
+    site_id: 'MLB',
+    tags: ['user_product_seller', 'test_user', 'normal'],
+    email: 'test_user_3774910712@testuser.com',
+    first_name: 'Test',
+  };
+
+  test('a tag test_user identifica a conta de teste', async () => {
+    const { g, fetch } = gateway([{ status: 200, json: RESPOSTA }]);
+
+    expect(await g.descreverConta()).toEqual({
+      id: '3699720609',
+      apelido: 'TESTUSER3774910712453320476',
+      siteId: 'MLB',
+      ehContaDeTeste: true,
+    });
+    expect(fetch.chamadas[0].url).toBe('https://api.mercadopago.com/users/me');
+  });
+
+  test('nenhum dado do titular sai do adaptador', async () => {
+    // A igualdade exata acima já garante; este teste existe para o requisito
+    // não depender de alguém reparar que `email` ficou de fora.
+    const { g } = gateway([{ status: 200, json: RESPOSTA }]);
+
+    expect(JSON.stringify(await g.descreverConta())).not.toMatch(/email|first_name|testuser\.com/i);
+  });
+
+  test('conta sem a tag test_user não é conta de teste', async () => {
+    const { g } = gateway([
+      { status: 200, json: { ...RESPOSTA, tags: ['normal', 'user_product_seller'] } },
+    ]);
+
+    expect((await g.descreverConta()).ehContaDeTeste).toBe(false);
+  });
+
+  test('resposta sem tags nenhuma não é conta de teste', async () => {
+    // Na dúvida, não é de teste: a trava falha fechada.
+    const { g } = gateway([{ status: 200, json: { id: 1, nickname: 'x', site_id: 'MLB' } }]);
+
+    expect((await g.descreverConta()).ehContaDeTeste).toBe(false);
+  });
+
+  test('credencial recusada não vira "conta comum": estoura', async () => {
+    const { g } = gateway([{ status: 401, json: {} }]);
+
+    await expect(g.descreverConta()).rejects.toThrow(/HTTP 401/);
+  });
+
+  test('provedor fora do ar vira PAGAMENTO_INDISPONIVEL', async () => {
+    const { g } = gateway([{ status: 500, json: {} }]);
+
+    await expect(g.descreverConta()).rejects.toMatchObject({ codigo: 'PAGAMENTO_INDISPONIVEL' });
+  });
+});
+
+describe('GatewayNaoConfigurado', () => {
+  // Sem credencial, a API sobe e a rota de pagamento responde 503. Se um método
+  // do contrato ficar de fora daqui, o que estoura é "precisa ser implementado
+  // pelo adaptador concreto" — erro interno, e não a indisponibilidade que o
+  // aplicativo sabe tratar. Foi por um esquecimento desse tipo que o teste de
+  // conformidade dos dublês nasceu, na Etapa 4.
+  const { GatewayNaoConfigurado } = require('../../src/infra/pagamento/GatewayMercadoPago');
+  const { GatewayDePagamento } = require('../../src/domain/pagamentos');
+
+  const metodos = Object.getOwnPropertyNames(GatewayDePagamento.prototype).filter(
+    (nome) => nome !== 'constructor'
+  );
+
+  test('implementa todos os métodos do contrato', () => {
+    const faltando = metodos.filter(
+      (nome) => !Object.prototype.hasOwnProperty.call(GatewayNaoConfigurado.prototype, nome)
+    );
+
+    expect(faltando).toEqual([]);
+  });
+
+  test.each(metodos)('%s responde PAGAMENTO_INDISPONIVEL', async (metodo) => {
+    await expect(new GatewayNaoConfigurado()[metodo]('x')).rejects.toMatchObject({
+      codigo: 'PAGAMENTO_INDISPONIVEL',
+      status: 503,
+    });
+  });
+});
+
 describe('pagamentosDaReferencia', () => {
   test('busca pela referência e traduz cada resultado', async () => {
     const { g, fetch } = gateway([

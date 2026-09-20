@@ -12,6 +12,7 @@ const config = require('./config');
 const { criarApp } = require('./interfaces/http/app');
 const { criarVerificadorFirebase } = require('./infra/firebase/verificadorDeToken');
 const { criarGatewayDePagamento } = require('./infra/pagamento');
+const { verificarContaDeSandbox } = require('./infra/pagamento/travaDeSandbox');
 const { RepositorioDeConsultasPg } = require('./infra/db/RepositorioDeConsultasPg');
 const { RepositorioDePagamentosPg } = require('./infra/db/RepositorioDePagamentosPg');
 const { ExpirarReservasVencidas } = require('./application/ExpirarReservasVencidas');
@@ -56,45 +57,84 @@ if (!config.MERCADO_PAGO_ACCESS_TOKEN) {
 
 const app = criarApp({ verificarToken, gateway });
 
-const servidor = app.listen(config.PORTA, () => {
-  console.log(
-    `API de agendamento ouvindo em http://localhost:${config.PORTA} (${config.NODE_ENV})`
-  );
-  // Registrar o transporte poupa diagnóstico: uma lentidão inesperada costuma
-  // ser o WebSocket ligado numa rede em que o TCP direto funcionaria.
-  console.log(`Banco: PostgreSQL via ${transporte}`);
-});
+// Atribuídos em `subir()`. Ficam nulos enquanto a trava de sandbox é
+// verificada — um SIGTERM que chegue nessa janela precisa achar os dois nulos
+// e sair limpo, em vez de estourar.
+let servidor = null;
+let rotinaDeExpiracao = null;
 
-servidor.on('error', (erro) => {
-  if (erro.code === 'EADDRINUSE') {
-    console.error(
-      `\nA porta ${config.PORTA} já está em uso — provavelmente a API já está rodando\n` +
-        'em outro terminal. Use a que está aberta, ou encerre-a antes de subir outra.\n'
+function subir() {
+  servidor = app.listen(config.PORTA, () => {
+    console.log(
+      `API de agendamento ouvindo em http://localhost:${config.PORTA} (${config.NODE_ENV})`
     );
-    process.exit(1);
-  }
-  throw erro;
-});
+    // Registrar o transporte poupa diagnóstico: uma lentidão inesperada costuma
+    // ser o WebSocket ligado numa rede em que o TCP direto funcionaria.
+    console.log(`Banco: PostgreSQL via ${transporte}`);
+  });
 
-// Reservas não pagas voltam à grade. Só roda enquanto a API está de pé — no
-// plano gratuito do Render ela hiberna, e por isso a rotina também roda logo
-// na subida.
-const expirar = new ExpirarReservasVencidas({
-  consultas: new RepositorioDeConsultasPg(),
-  pagamentos: new RepositorioDePagamentosPg(),
-  gateway,
-});
-const rotinaDeExpiracao = agendar(() => expirar.executar(), INTERVALO_DA_EXPIRACAO_MS, {
-  nome: 'expiração de reservas',
-  aoTerminar: ({ expiradas, confirmadas, adiadas, falhas }) => {
-    if (expiradas || confirmadas || adiadas || falhas) {
-      console.log(
-        `Expiração de reservas: ${expiradas} expirada(s), ${confirmadas} confirmada(s) ` +
-          `na reconciliação, ${adiadas} adiada(s), ${falhas} falha(s).`
+  servidor.on('error', (erro) => {
+    if (erro.code === 'EADDRINUSE') {
+      console.error(
+        `\nA porta ${config.PORTA} já está em uso — provavelmente a API já está rodando\n` +
+          'em outro terminal. Use a que está aberta, ou encerre-a antes de subir outra.\n'
       );
+      process.exit(1);
     }
-  },
-});
+    throw erro;
+  });
+
+  // Reservas não pagas voltam à grade. Só roda enquanto a API está de pé — no
+  // plano gratuito do Render ela hiberna, e por isso a rotina também roda logo
+  // na subida.
+  const expirar = new ExpirarReservasVencidas({
+    consultas: new RepositorioDeConsultasPg(),
+    pagamentos: new RepositorioDePagamentosPg(),
+    gateway,
+  });
+  rotinaDeExpiracao = agendar(() => expirar.executar(), INTERVALO_DA_EXPIRACAO_MS, {
+    nome: 'expiração de reservas',
+    aoTerminar: ({ expiradas, confirmadas, adiadas, falhas }) => {
+      if (expiradas || confirmadas || adiadas || falhas) {
+        console.log(
+          `Expiração de reservas: ${expiradas} expirada(s), ${confirmadas} confirmada(s) ` +
+            `na reconciliação, ${adiadas} adiada(s), ${falhas} falha(s).`
+        );
+      }
+    },
+  });
+}
+
+/**
+ * A porta só abre depois de o provedor confirmar que a credencial é de uma
+ * conta de teste. Sem credencial não há o que verificar: a rota de pagamento
+ * responde 503 e o resto da API funciona.
+ */
+async function iniciar() {
+  if (config.MERCADO_PAGO_ACCESS_TOKEN) {
+    const veredito = await verificarContaDeSandbox(gateway);
+    if (!veredito.liberado) {
+      console.error(`\nA API não subiu — trava de sandbox.\n\n${veredito.mensagem}\n`);
+      // `process.exit` aqui derruba o processo com o soquete do provedor ainda
+      // aberto: no Windows isso vira uma asserção do libuv e um código de saída
+      // absurdo (0xC0000409) no lugar do 1. Marcar o código e deixar o laço de
+      // eventos esvaziar dá uma saída limpa; o prazo é o tiro de misericórdia
+      // para o caso de alguma conexão ociosa segurar o processo, e como está
+      // `unref`, ele próprio não impede a saída natural.
+      process.exitCode = 1;
+      await encerrar().catch(() => {});
+      setTimeout(() => process.exit(1), 2_000).unref();
+      return;
+    }
+    console.log(
+      `Mercado Pago: conta de teste ${veredito.conta.id} ` +
+        `(${veredito.conta.apelido ?? 'sem apelido'}, ${veredito.conta.siteId ?? '?'})`
+    );
+  }
+
+  if (desligando) return;
+  subir();
+}
 
 /**
  * Desligamento: o Render manda SIGTERM a cada publicação.
@@ -112,7 +152,16 @@ function desligar(sinal) {
   desligando = true;
   console.log(`\n${sinal} recebido, encerrando...`);
 
-  rotinaDeExpiracao.parar();
+  rotinaDeExpiracao?.parar();
+
+  // O sinal chegou enquanto a trava de sandbox era verificada: não há porta
+  // aberta nem requisição em andamento, e o pool pode nem ter sido usado.
+  if (!servidor) {
+    encerrar()
+      .catch(() => {})
+      .finally(() => process.exit(0));
+    return;
+  }
 
   const prazo = setTimeout(() => {
     console.error(`Encerramento passou de ${PRAZO_DO_DESLIGAMENTO_MS / 1000} s; saindo à força.`);
@@ -139,3 +188,14 @@ function desligar(sinal) {
 for (const sinal of ['SIGTERM', 'SIGINT']) {
   process.on(sinal, () => desligar(sinal));
 }
+
+iniciar().catch((erro) => {
+  console.error(`\nFalha ao iniciar a API: ${erro.message}\n`);
+  // Mesmo cuidado da trava de sandbox: sair à força com uma conexão do
+  // provedor aberta produz uma asserção do libuv no Windows e um código de
+  // saída absurdo, escondendo a mensagem acima.
+  process.exitCode = 1;
+  encerrar()
+    .catch(() => {})
+    .finally(() => setTimeout(() => process.exit(1), 2_000).unref());
+});
