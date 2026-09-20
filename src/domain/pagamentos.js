@@ -11,8 +11,10 @@
  *
  *   { id, status, referencia, valorCentavos, moeda, modoReal }
  *
- * `status` já vem traduzido para os estados de ./Pagamento.js; `modoReal` diz se
- * o pagamento aconteceu fora do sandbox.
+ * `status` já vem traduzido para os estados de ./Pagamento.js. `modoReal` é o
+ * que o provedor diz sobre o modo da operação — registrado na auditoria, mas
+ * NÃO usado como trava de sandbox: ver o comentário em ./Pagamento.js e a
+ * verificação de conta em infra/pagamento/travaDeSandbox.js.
  */
 
 function naoImplementado(metodo) {
@@ -50,6 +52,22 @@ class GatewayDePagamento {
    */
   async pagamentosDaReferencia(_referencia) {
     naoImplementado('GatewayDePagamento.pagamentosDaReferencia');
+  }
+
+  /**
+   * Quem é o dono da credencial — e, sobretudo, se é uma conta de TESTE.
+   *
+   * Está no contrato, e não escondido no adaptador, porque a restrição a
+   * sandbox é uma exigência do trabalho, não um detalhe de implementação:
+   * nenhum provedor pode ser ligado a esta API sem saber responder se o
+   * dinheiro que ele move é de verdade. A API confere isto na subida e se
+   * recusa a abrir a porta se a resposta não for "conta de teste".
+   *
+   * @returns {Promise<{id: string, apelido: string|null, siteId: string|null,
+   *                    ehContaDeTeste: boolean}>}
+   */
+  async descreverConta() {
+    naoImplementado('GatewayDePagamento.descreverConta');
   }
 }
 

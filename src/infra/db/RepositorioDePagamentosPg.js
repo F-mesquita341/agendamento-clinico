@@ -139,34 +139,28 @@ class RepositorioDePagamentosPg extends RepositorioDePagamentos {
       });
 
       if (efeito.anomalia) {
-        // O provedor reenvia a mesma notificação até receber 200, e há
-        // anomalias que nunca chegam a virar linha de pagamento — a de modo
-        // real, por exemplo. Sem esta conferência, cada reenvio gravaria a
-        // mesma anomalia de novo, e a auditoria cresceria com repetições do
-        // mesmo fato.
-        const { rowCount: jaRegistrada } = await cliente.query(
-          `SELECT 1 FROM auditoria
-            WHERE acao = 'pagamento.anomalia'
-              AND entidade = 'consulta'
-              AND entidade_id = $1
-              AND detalhe->>'pagamentoExterno' = $2
-              AND detalhe->>'anomalia' = $3
-            LIMIT 1`,
-          [consultaId, pagamento.id, efeito.anomalia]
-        );
-        if (!jaRegistrada) {
-          await auditar(cliente, {
-            atorTipo: ator,
-            acao: 'pagamento.anomalia',
-            entidade: 'consulta',
-            entidadeId: consultaId,
-            detalhe: { anomalia: efeito.anomalia, pagamentoExterno: pagamento.id, status: pagamento.status },
-          });
-        }
+        // Não há conferência de repetição aqui, e não é esquecimento: toda
+        // anomalia vem acompanhada de gravação do pagamento, e um reenvio da
+        // mesma notificação sai antes, no `statusAnterior === status` do
+        // domínio. Existiu uma conferência assim enquanto o modo real era
+        // recusado sem virar linha de pagamento; com aquela trava fora, ela
+        // deixou de ter caminho que a alcançasse — e código que nenhum teste
+        // consegue derrubar não se mantém "por garantia".
+        await auditar(cliente, {
+          atorTipo: ator,
+          acao: 'pagamento.anomalia',
+          entidade: 'consulta',
+          entidadeId: consultaId,
+          detalhe: { anomalia: efeito.anomalia, pagamentoExterno: pagamento.id, status: pagamento.status },
+        });
       }
 
       if (efeito.acao === 'ignorar') {
-        return { desfecho: efeito.anomalia ? 'anomalia' : 'sem_mudanca', anomalia: efeito.anomalia };
+        // `efeito.anomalia` é null em todo caminho que chega aqui hoje. Repassar
+        // em vez de fixar `null` não é defesa contra hipótese: é não descartar
+        // informação que a função tem em mãos, e que já foi para a auditoria
+        // logo acima.
+        return { desfecho: 'sem_mudanca', anomalia: efeito.anomalia };
       }
 
       let pagamentoId;
@@ -204,7 +198,11 @@ class RepositorioDePagamentosPg extends RepositorioDePagamentos {
         acao: `pagamento.${efeito.statusDoPagamento}`,
         entidade: 'pagamento',
         entidadeId: pagamentoId,
-        detalhe: { consultaId, pagamentoExterno: pagamento.id },
+        // `modoReal` é o que o provedor diz sobre o modo da operação. Não
+        // decide nada (ver domain/Pagamento.js), mas fica registrado: se algum
+        // dia houver dúvida sobre a natureza de um pagamento destas sessões, a
+        // resposta está na auditoria, e não na memória de quem configurou.
+        detalhe: { consultaId, pagamentoExterno: pagamento.id, modoReal: pagamento.modoReal === true },
       });
 
       if (efeito.confirmarConsulta) {

@@ -41,11 +41,21 @@ const DESCRICAO_DO_ITEM = 'Consulta médica';
  *            confirmarConsulta: boolean, anomalia: string|null}}
  */
 function decidirEfeitoDoPagamento({ consulta, pagamento, statusAnterior }) {
-  // Trava de segurança acadêmica: o trabalho opera só em sandbox. Um pagamento
-  // real não é gravado como se fosse de teste — é ignorado e denunciado.
-  if (pagamento.modoReal) {
-    return { acao: 'ignorar', statusDoPagamento: null, confirmarConsulta: false, anomalia: 'pagamento_em_modo_real' };
-  }
+  // `pagamento.modoReal` NÃO é consultado aqui, e isso é deliberado.
+  //
+  // Até a primeira ligação com o Mercado Pago de verdade, esta função recusava
+  // pagamento com modo real, supondo que "modo real" e "fora do sandbox"
+  // fossem a mesma coisa. Não são: um pagamento feito com credencial de conta
+  // de TESTE, cartão de teste e dinheiro fictício volta com `live_mode: true`,
+  // porque para o provedor a conta de teste é uma conta comum operando em modo
+  // produção — o que é falso é a conta, não o modo. A trava recusaria todo
+  // pagamento legítimo e ainda assim não distinguiria o caso perigoso.
+  //
+  // A proteção mudou de lugar e ficou mais forte: a API confere na SUBIDA que
+  // a credencial pertence a uma conta de teste (tag `test_user` do provedor) e
+  // se recusa a abrir a porta se não for — antes de existir qualquer cobrança,
+  // em vez de depois. Ver infra/pagamento/travaDeSandbox.js. O `modoReal`
+  // continua registrado na auditoria de cada pagamento, como informação.
 
   // O provedor já nos contou isto. Reenvio de notificação é rotina: não muda
   // nada e não gera auditoria nova.

@@ -319,18 +319,19 @@ describe('POST /webhooks/mercadopago', () => {
     expect(anomalias.map((a) => a.detalhe.anomalia)).toEqual(['valor_divergente']);
   });
 
-  test('pagamento em modo real é ignorado — o trabalho opera só em sandbox', async () => {
+  test('o modo relatado pelo provedor não bloqueia, mas fica registrado', async () => {
+    // Todo pagamento do trabalho chega assim: a conta de teste do Mercado Pago
+    // opera em modo produção, e `live_mode` vem verdadeiro mesmo com dinheiro
+    // fictício. Se isto bloqueasse, nenhuma consulta seria confirmada.
+    // A garantia de sandbox é a verificação da conta na subida da API.
     const { consulta, referencia } = await comCheckout();
     const pagamento = gateway.pagar(referencia, { modoReal: true });
 
     await notificar(pagamento.id);
 
-    expect(await estado(consulta.id)).toMatchObject({ status: 'pendente_pagamento' });
-    // Nem gravado como pagamento: o checkout segue aberto, sem vínculo.
-    expect(await pagamentosDa(consulta.id)).toEqual([
-      expect.objectContaining({ status: 'pendente', pagamento_externo_id: null }),
-    ]);
-    expect((await auditoria('pagamento.anomalia'))[0].detalhe.anomalia).toBe('pagamento_em_modo_real');
+    expect(await estado(consulta.id)).toMatchObject({ status: 'confirmada' });
+    expect(await auditoria('pagamento.anomalia')).toEqual([]);
+    expect((await auditoria('pagamento.aprovado'))[0].detalhe.modoReal).toBe(true);
   });
 
   test('pagamento que o provedor não conhece não muda nada', async () => {
@@ -376,12 +377,12 @@ describe('POST /webhooks/mercadopago', () => {
     expect(await estado(consulta.id)).toMatchObject({ status: 'pendente_pagamento' });
   });
 
-  test('anomalia repetida não vira duas linhas de auditoria', async () => {
-    // O Mercado Pago reenvia até receber 200. Pagamento em modo real nunca
-    // vira linha de pagamento, então não há status anterior para comparar: sem
-    // cuidado, cada reenvio gravaria a mesma anomalia de novo.
+  test('reenvio da mesma notificação anômala não duplica a auditoria', async () => {
+    // O Mercado Pago reenvia até receber 200. A proteção contra repetir a
+    // anomalia é o próprio domínio: o segundo reenvio encontra o pagamento já
+    // gravado com o mesmo status e sai antes de decidir qualquer coisa.
     const { referencia } = await comCheckout();
-    const pagamento = gateway.pagar(referencia, { modoReal: true });
+    const pagamento = gateway.pagar(referencia, { valorCentavos: 100 });
 
     await notificar(pagamento.id);
     await notificar(pagamento.id);
