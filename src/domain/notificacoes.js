@@ -24,8 +24,14 @@ class ServicoDeNotificacao {
    * bom por causa de uma queda momentânea deixaria o paciente sem lembrete
    * para sempre, e ninguém perceberia.
    *
+   * `expiraEm` é o instante depois do qual a mensagem não deve mais ser
+   * entregue. Sem ele, o provedor guarda a mensagem para aparelho desligado
+   * por semanas, e um lembrete "amanhã às 08:00" poderia chegar dias depois da
+   * consulta — falso duas vezes: a consulta já passou, e o "amanhã" foi
+   * calculado no envio, não na entrega.
+   *
    * @param {{tokens: Array<string>, titulo: string, corpo: string,
-   *          dados?: Record<string, string>}} _mensagem
+   *          dados?: Record<string, string>, expiraEm?: Date}} _mensagem
    * @returns {Promise<{entregues: number, invalidos: Array<string>}>}
    */
   async enviar(_mensagem) {

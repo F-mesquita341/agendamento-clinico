@@ -25,11 +25,11 @@ class NotificadorFalso extends ServicoDeNotificacao {
     this.indisponivel = false;
   }
 
-  async enviar({ tokens, titulo, corpo, dados }) {
+  async enviar({ tokens, titulo, corpo, dados, expiraEm }) {
     if (this.indisponivel) {
       throw new Error('Firebase Cloud Messaging indisponível');
     }
-    this.enviados.push({ tokens: [...tokens], titulo, corpo, dados });
+    this.enviados.push({ tokens: [...tokens], titulo, corpo, dados, expiraEm });
 
     const invalidos = tokens.filter((t) => this.mortos.has(t));
     return { entregues: tokens.length - invalidos.length, invalidos };

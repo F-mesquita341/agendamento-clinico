@@ -12,9 +12,8 @@ const { EnviarLembretes } = require('../../src/application/EnviarLembretes');
 const { RepositorioDeConsultasPg } = require('../../src/infra/db/RepositorioDeConsultasPg');
 const { RepositorioDeDispositivosPg } = require('../../src/infra/db/RepositorioDeDispositivosPg');
 const { NotificadorFalso } = require('../helpers/notificadorFalso');
-const { limpar } = require('../helpers/semente');
+const { limpar, semear, semearPacientes } = require('../helpers/semente');
 const { consultar, encerrar } = require('../../src/infra/db/pool');
-const { VERSAO_TERMO_CONSENTIMENTO } = require('../../src/domain/Paciente');
 
 const HORAS = 60 * 60 * 1000;
 const AGORA = new Date('2026-09-21T13:00:00Z');
@@ -31,38 +30,33 @@ beforeEach(async () => {
   rotina = new EnviarLembretes({ consultas, dispositivos, notificador, relogio });
 });
 
+// Vários testes espionam métodos do adaptador compartilhado `consultas`.
+// Restaurar aqui, e não na última linha de cada teste, garante que uma
+// asserção que falhe no meio não deixe o espião vazar para os testes seguintes.
+afterEach(() => jest.restoreAllMocks());
+
 afterAll(() => encerrar());
 
-/** Monta clínica, profissional, paciente, horário e consulta de uma vez. */
+/**
+ * Uma consulta do paciente A com o José Antônio Ferreira, da Cardiologia — os
+ * dois da semente comum. O nome e a especialidade são justamente o que o texto
+ * do lembrete NÃO pode mostrar, e o teste de privacidade procura por eles.
+ */
 async function cenario({
   comecaDaquiA = 20 * HORAS,
   status = 'confirmada',
   lembreteEnviadoEm = null,
   aparelhos = ['token-do-aparelho'],
 } = {}) {
-  const { rows: clinicas } = await consultar(
-    `INSERT INTO clinica (nome, cnpj) VALUES ('Clínica', '11.111.111/0001-11') RETURNING id`
-  );
-  const { rows: esp } = await consultar(
-    `INSERT INTO especialidade (nome) VALUES ('Cardiologia') RETURNING id`
-  );
-  const { rows: profs } = await consultar(
-    `INSERT INTO profissional (clinica_id, especialidade_id, nome, registro_conselho, valor_consulta_centavos)
-     VALUES ($1, $2, 'José Antônio Ferreira', 'CRM-CE 11111', 25000) RETURNING id`,
-    [clinicas[0].id, esp[0].id]
-  );
-  const { rows: pacientes } = await consultar(
-    `INSERT INTO paciente (firebase_uid, nome, email, consentimento_versao, consentimento_em)
-     VALUES ('uid-a', 'Paciente A', 'a@example.com', $1, now()) RETURNING id`,
-    [VERSAO_TERMO_CONSENTIMENTO]
-  );
+  const { profissionais } = await semear();
+  const { a: pacienteId } = await semearPacientes();
 
   const inicio = new Date(AGORA.getTime() + comecaDaquiA);
   const { rows: horarios } = await consultar(
     `INSERT INTO horario (profissional_id, inicio, fim, status)
      VALUES ($1, $2::timestamptz, $2::timestamptz + INTERVAL '30 minutes', 'reservado')
      RETURNING id`,
-    [profs[0].id, inicio.toISOString()]
+    [profissionais.jose, inicio.toISOString()]
   );
 
   // `periodo` sustenta a restrição de exclusão da migration 007, que impede o
@@ -75,7 +69,7 @@ async function cenario({
        FROM horario h WHERE h.id = $2
      RETURNING id`,
     [
-      pacientes[0].id,
+      pacienteId,
       horarios[0].id,
       status,
       lembreteEnviadoEm,
@@ -84,10 +78,10 @@ async function cenario({
   );
 
   for (const token of aparelhos) {
-    await dispositivos.registrar({ pacienteId: pacientes[0].id, token, plataforma: 'android' });
+    await dispositivos.registrar({ pacienteId, token, plataforma: 'android' });
   }
 
-  return { consultaId: Number(criadas[0].id), pacienteId: Number(pacientes[0].id), inicio };
+  return { consultaId: Number(criadas[0].id), pacienteId, inicio };
 }
 
 async function marcaDoLembrete(consultaId) {
@@ -176,6 +170,16 @@ describe('o que é enviado', () => {
     const { titulo, corpo } = notificador.enviados[0];
     expect(`${titulo} ${corpo}`).not.toMatch(/cardiolog|josé|ferreira/i);
     expect(corpo).toMatch(/consulta amanhã às/);
+  });
+
+  test('a mensagem expira no começo da consulta', async () => {
+    // Sem prazo, o provedor guarda a mensagem por semanas para aparelho
+    // desligado, e o lembrete poderia chegar depois da consulta.
+    const { inicio } = await cenario();
+
+    await rotina.executar();
+
+    expect(notificador.enviados[0].expiraEm).toEqual(inicio);
   });
 
   test('leva o id da consulta, para o aplicativo saber que tela abrir', async () => {
@@ -271,7 +275,6 @@ describe('quando o provedor falha', () => {
     // Chamar `desmarcarLembrete` ali seria apagar uma marca de origem
     // desconhecida — e apagá-la faria o lembrete sair de novo.
     const { consultaId } = await cenario();
-    const original = consultas.reservarLembrete.bind(consultas);
     const desmarcar = jest.spyOn(consultas, 'desmarcarLembrete');
     jest
       .spyOn(consultas, 'reservarLembrete')
@@ -282,9 +285,27 @@ describe('quando o provedor falha', () => {
     expect(resultado).toMatchObject({ adiados: 1 });
     expect(desmarcar).not.toHaveBeenCalled();
     expect(await marcaDoLembrete(consultaId)).toBeNull();
+  });
 
-    consultas.reservarLembrete = original;
-    desmarcar.mockRestore();
+  test.each([
+    ['a auditoria', 'consultas', 'registrarLembreteEnviado'],
+    ['apagar os tokens mortos', 'dispositivos', 'esquecer'],
+  ])('falha DEPOIS do envio (em %s) não desfaz a marca — nada é reenviado', async (_rotulo, qual, metodo) => {
+    // O lembrete já saiu. Se esta falha subisse até o `catch` da rotina, a
+    // marca seria desfeita e a rodada seguinte mandaria o mesmo lembrete de
+    // novo: exatamente a duplicata que o portão da etapa proíbe.
+    const { consultaId } = await cenario({ aparelhos: ['vivo', 'morto'] });
+    notificador.mortos.add('morto');
+    const alvo = qual === 'consultas' ? consultas : dispositivos;
+    jest.spyOn(alvo, metodo).mockRejectedValueOnce(new Error('banco soluçou'));
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    await rotina.executar();
+    const segunda = await rotina.executar();
+
+    expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);
+    expect(segunda.enviados).toBe(0);
+    expect(notificador.quantidade).toBe(1);
   });
 
   test('uma consulta problemática não impede as outras', async () => {

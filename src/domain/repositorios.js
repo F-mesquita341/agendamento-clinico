@@ -275,21 +275,26 @@ class RepositorioDeDispositivos {
    * em vez de criar outra linha: um aparelho que trocou de conta não pode
    * continuar recebendo o lembrete do dono anterior.
    *
+   * Registro novo e reatribuição entram na auditoria, sem o token. Registrar de
+   * novo o próprio aparelho não entra: o aplicativo faz isso a cada abertura, e
+   * a auditoria viraria ruído.
+   *
    * @param {{pacienteId: number, token: string, plataforma: string}} _dados
-   * @returns {Promise<void>}
+   * @returns {Promise<{id: number}>} o id do aparelho — é por ele, e não pelo
+   *          token, que o aparelho é revogado
    */
   async registrar(_dados) {
     naoImplementado('RepositorioDeDispositivos.registrar');
   }
 
   /**
-   * Remove o token, mas só se ele pertencer a este paciente.
+   * Remove o aparelho, mas só se ele pertencer a este paciente. Auditado.
    *
    * @returns {Promise<boolean>} false quando não havia o que remover — a rota
-   *          responde 404 nos dois casos, para ninguém descobrir token alheio
-   *          por tentativa.
+   *          responde 404 nos dois casos, para ninguém descobrir aparelho
+   *          alheio por tentativa.
    */
-  async revogar(_pacienteId, _token) {
+  async revogar(_pacienteId, _dispositivoId) {
     naoImplementado('RepositorioDeDispositivos.revogar');
   }
 

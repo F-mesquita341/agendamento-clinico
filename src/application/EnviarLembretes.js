@@ -15,8 +15,10 @@
  *   2. buscar os aparelhos e enviar FORA da transação — segurar bloqueio do
  *      banco esperando rede travaria o agendamento, mesma regra da
  *      reconciliação de pagamento;
- *   3. apagar os tokens que o provedor disse não existirem mais;
- *   4. se o envio falhou por motivo momentâneo, desfazer a marca, para a
+ *   3. apagar os tokens que o provedor disse não existirem mais, e auditar —
+ *      DEPOIS do envio, e sem poder desfazer a marca: falha aqui não pode
+ *      virar reenvio de um lembrete que já foi entregue;
+ *   4. se o ENVIO falhou por motivo momentâneo, desfazer a marca, para a
  *      rodada seguinte tentar.
  *
  * Marcar ANTES de enviar troca o risco de duplicata pelo risco de perda. É
@@ -92,27 +94,46 @@ class EnviarLembretes {
     }
 
     const { titulo, corpo } = textoDoLembrete(new Date(inicio), agora);
+    // Se ESTE envio falhar, o erro sobe e a marca é desfeita: nada saiu, e a
+    // rodada seguinte tenta de novo.
     const { entregues, invalidos } = await this.notificador.enviar({
       tokens,
       titulo,
       corpo,
       // Só o identificador interno, para o aplicativo saber que tela abrir.
       dados: { consultaId: String(consultaId), tipo: 'lembrete' },
+      // Depois do começo da consulta, o lembrete não serve mais para nada.
+      expiraEm: new Date(inicio),
     });
 
-    if (invalidos.length > 0) {
-      await this.dispositivos.esquecer(invalidos);
+    // DAQUI EM DIANTE O LEMBRETE JÁ SAIU. Nenhuma falha abaixo pode subir: ela
+    // cairia no `catch` de `executar`, que desfaria a marca, e a rodada
+    // seguinte mandaria o mesmo lembrete de novo — a duplicata que o portão da
+    // etapa proíbe. Apagar token morto e auditar são contabilidade; se falharem,
+    // o log diz, e a marca fica de pé.
+    await this.contabilizar(consultaId, { entregues, invalidos });
+
+    // Todos os aparelhos estavam mortos: ninguém recebeu. Contar como enviado
+    // seria registrar entrega que não houve. A marca fica de pé: os tokens
+    // acabaram de ser apagados, não há o que reenviar.
+    return entregues > 0;
+  }
+
+  async contabilizar(consultaId, { entregues, invalidos }) {
+    try {
+      if (invalidos.length > 0) {
+        await this.dispositivos.esquecer(invalidos);
+      }
+      if (entregues > 0) {
+        await this.consultas.registrarLembreteEnviado(consultaId, entregues);
+      }
+    } catch (erro) {
+      console.error(
+        `Lembrete da consulta ${consultaId} ENTREGUE, mas o registro falhou ` +
+          '(a marca foi mantida para não reenviar):',
+        erro.message
+      );
     }
-
-    // Todos os aparelhos estavam mortos: ninguém recebeu. Contar como enviado e
-    // auditar "lembrete.enviado" com zero aparelhos seria registrar entrega que
-    // não houve — e a auditoria deste trabalho existe para ser confiável. A
-    // marca fica de pé: os tokens acabaram de ser apagados, não há o que
-    // reenviar, e insistir faria a rotina varrer esta consulta para sempre.
-    if (entregues === 0) return false;
-
-    await this.consultas.registrarLembreteEnviado(consultaId, entregues);
-    return true;
   }
 }
 

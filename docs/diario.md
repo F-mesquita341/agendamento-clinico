@@ -1262,3 +1262,51 @@ reduzido de uma hora para 15 minutos para aumentar a chance de alcançar a janel
 acordada, e a rotina roda também na subida. Mas o lembrete pode atrasar, ou não
 sair. A página de prova consulta a rota de saúde a cada 4 minutos enquanto
 espera — é ferramenta de teste, e isso não esconde a limitação do uso real.
+
+## 21/09/2026 — Revisão detalhada da Etapa 9
+
+Tentei a revisão com nove revisores independentes; oito morreram no limite de
+sessão da conta, e a revisão acabou feita por mim, aproveitando os achados do
+único que terminou (reúso). Quatorze achados, todos corrigidos.
+
+**O mais sério contrariava o portão da etapa.** Se o lembrete saísse e, em
+seguida, a gravação da auditoria falhasse, o mesmo `catch` que desfaz a marca
+em falha de envio a desfazia também — e a rodada seguinte mandava o lembrete de
+novo. Eu tinha protegido a falha ANTES da marca e deixado aberta a falha DEPOIS
+do envio. Agora só o envio desfaz a marca; auditar e apagar token morto viraram
+contabilidade, que registra o erro no log e não mexe na marca.
+
+**O segundo era de semântica do provedor.** A mensagem ia sem prazo de
+validade, e o FCM guarda mensagem de aparelho desligado por até quatro semanas.
+Um lembrete "amanhã às 08:00" podia chegar dias depois da consulta — falso duas
+vezes, porque o "amanhã" é calculado no envio e não na entrega. Agora a
+mensagem expira no começo da consulta, nas três plataformas.
+
+**Os dois pontos que estavam em aberto foram decididos.** O aparelho é revogado
+pelo id, e não pelo token: o caminho da URL é o lugar mais registrado de uma
+requisição. Corpo em DELETE tiraria o token da URL também, mas não tem
+significado definido no HTTP e pode ser descartado no caminho. E registro,
+reatribuição e revogação passaram a ser auditados, sem o token.
+
+**Uma descoberta de ambiente na migration.** Renomear a tabela não renomeia
+restrições nem sequência, e elas continuavam `device_token_*`. Ao corrigir,
+apareceu que o PostgreSQL 18 (o do Neon) registra também as restrições NOT NULL
+como restrições nomeadas, e o 16 (o da integração contínua) não. A renomeação
+virou varredura, porque uma lista fixa quebraria numa das versões.
+
+**Dois erros meus apanhados antes do commit.** Escrevi num comentário que a CTE
+do registro impedia dois registros simultâneos de verem "sem dono" — não impede,
+porque ela vê o banco como estava no início da instrução; o comentário agora
+diz a verdade e o custo (uma linha de auditoria repetida, inofensiva). E deixei
+um `agora` vazar para a assinatura de `enviar`, que passou para o construtor.
+
+Confirmação por reintrodução: nove defeitos em duas rodadas, cada um derrubando
+exatamente os seus testes. Uma correção ficou sem essa prova, e por um motivo
+que vale dizer: a janela da varredura passou a vir da mesma constante do
+domínio, mas reintroduzir o `INTERVAL '24 hours'` escrito à mão não muda
+comportamento nenhum enquanto os dois valores forem iguais. O ganho é impedir
+divergência futura — algo que um teste só enxergaria mudando a constante.
+
+Ambiente: a rede de onde trabalhei hoje bloqueia a porta 5432, e o Neon ficou
+inalcançável por TCP. A suíte rodou por WebSocket (`TRANSPORTE_BANCO=websocket`),
+que o projeto já previa desde a Etapa 1 exatamente para isso.

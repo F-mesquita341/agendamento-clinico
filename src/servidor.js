@@ -114,6 +114,14 @@ function subir() {
   // minutos parada, e a rotina dorme junto. Varrer com mais frequência aumenta
   // a chance de a janela ser alcançada enquanto o serviço está acordado — e o
   // `agendar` já roda uma vez na subida, que é quando ele acorda.
+  //
+  // Sem credencial do Firebase a rotina nem liga. Ligada, ela reservaria cada
+  // consulta, falharia no envio e a desmarcaria de novo, a cada 15 minutos —
+  // só ruído no log. Em produção, config.js já recusa a subida sem credencial.
+  if (!config.credencialFirebase) {
+    console.warn('Aviso: lembretes de consulta desligados — sem credencial do Firebase.');
+    return;
+  }
   const lembrar = new EnviarLembretes({
     consultas: new RepositorioDeConsultasPg(),
     dispositivos: new RepositorioDeDispositivosPg(),

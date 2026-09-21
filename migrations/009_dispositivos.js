@@ -34,9 +34,37 @@
  * lá fica só a contagem de aparelhos avisados.
  */
 
+/**
+ * Renomear a tabela NÃO renomeia o que pende dela: chave primária, restrição
+ * única, chave estrangeira e sequência continuariam chamadas `device_token_*` —
+ * o nome que esta migration diz eliminar, aparecendo em toda mensagem de
+ * violação de unicidade.
+ *
+ * A renomeação é por varredura, e não por nome fixo, porque o conjunto muda com
+ * a versão do PostgreSQL: a 18 (a do Neon) registra também as restrições
+ * NOT NULL como restrições nomeadas, e a 16 (a da integração contínua) não.
+ * Uma lista fixa quebraria numa das duas.
+ */
+function renomearRestricoes(tabela, de, para) {
+  return `
+    DO $$
+    DECLARE r record;
+    BEGIN
+      FOR r IN SELECT conname FROM pg_constraint
+                WHERE conrelid = '${tabela}'::regclass AND starts_with(conname, '${de}')
+      LOOP
+        EXECUTE format('ALTER TABLE ${tabela} RENAME CONSTRAINT %I TO %I',
+                       r.conname, '${para}' || substr(r.conname, ${de.length + 1}));
+      END LOOP;
+    END $$;
+  `;
+}
+
 exports.up = (pgm) => {
   pgm.sql(`
     ALTER TABLE device_token RENAME TO dispositivo;
+    ${renomearRestricoes('dispositivo', 'device_token_', 'dispositivo_')}
+    ALTER SEQUENCE device_token_id_seq RENAME TO dispositivo_id_seq;
 
     ALTER TABLE dispositivo ALTER COLUMN plataforma DROP DEFAULT;
     ALTER TABLE dispositivo ADD CONSTRAINT dispositivo_plataforma_conhecida
@@ -55,6 +83,8 @@ exports.down = (pgm) => {
     ALTER TABLE dispositivo DROP COLUMN IF EXISTS atualizado_em;
     ALTER TABLE dispositivo DROP CONSTRAINT IF EXISTS dispositivo_plataforma_conhecida;
     ALTER TABLE dispositivo ALTER COLUMN plataforma SET DEFAULT 'android';
+    ALTER SEQUENCE dispositivo_id_seq RENAME TO device_token_id_seq;
     ALTER TABLE dispositivo RENAME TO device_token;
+    ${renomearRestricoes('device_token', 'dispositivo_', 'device_token_')}
   `);
 };

@@ -75,7 +75,9 @@
     const resumo = (token) => `${token.slice(0, 12)}…`;
 
     firebase.initializeApp(window.FIREBASE_CONFIG);
-    let tokenDoAparelho = null;
+    // O id, e não o token, é o que se guarda para revogar: o token do aparelho
+    // não vai em URL — ver src/interfaces/http/rotas/dispositivos.js.
+    let idDoAparelho = null;
     let idToken = null;
 
     async function api(metodo, caminho, corpo) {
@@ -87,7 +89,8 @@
         },
         body: corpo ? JSON.stringify(corpo) : undefined,
       });
-      return resposta.status;
+      const texto = await resposta.text();
+      return { status: resposta.status, corpo: texto ? JSON.parse(texto) : null };
     }
 
     $('ativar').addEventListener('click', async () => {
@@ -107,20 +110,24 @@
         registrar('Permissão de notificação concedida', 'ok');
 
         const trabalhador = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-        tokenDoAparelho = await firebase.messaging().getToken({
+        const tokenDoAparelho = await firebase.messaging().getToken({
           vapidKey: window.VAPID_KEY,
           serviceWorkerRegistration: trabalhador,
         });
         registrar(`Token do FCM obtido: ${resumo(tokenDoAparelho)}`, 'ok');
 
-        const status = await api('POST', '/dispositivos', { token: tokenDoAparelho, plataforma: 'web' });
-        registrar(
-          status === 201 ? 'Aparelho registrado na API → 201' : `A API respondeu HTTP ${status}`,
-          status === 201 ? 'ok' : 'erro'
-        );
-        $('revogar').disabled = status !== 201;
-
-        if (status === 201) manterAcordada();
+        const { status, corpo } = await api('POST', '/dispositivos', {
+          token: tokenDoAparelho,
+          plataforma: 'web',
+        });
+        if (status === 201) {
+          idDoAparelho = corpo.dispositivo.id;
+          registrar(`Aparelho registrado na API → 201 (id ${idDoAparelho})`, 'ok');
+          $('revogar').disabled = false;
+          manterAcordada();
+        } else {
+          registrar(`A API respondeu HTTP ${status}`, 'erro');
+        }
       } catch (erro) {
         // Mensagens do Firebase trazem só um código; não contêm senha nem chave.
         registrar(`Falhou: ${erro.code ?? erro.message}`, 'erro');
@@ -128,7 +135,7 @@
     });
 
     $('revogar').addEventListener('click', async () => {
-      const status = await api('DELETE', `/dispositivos/${encodeURIComponent(tokenDoAparelho)}`);
+      const { status } = await api('DELETE', `/dispositivos/${idDoAparelho}`);
       registrar(
         status === 204 ? 'Aparelho revogado → 204' : `A API respondeu HTTP ${status}`,
         status === 204 ? 'ok' : 'erro'

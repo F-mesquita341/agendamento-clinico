@@ -18,10 +18,10 @@
  * consulta das 8h como 11h.
  */
 
-const FUSO = 'America/Fortaleza';
+const { FUSO_DA_CLINICA } = require('./Relogio');
 
 const FORMATO = new Intl.DateTimeFormat('pt-BR', {
-  timeZone: FUSO,
+  timeZone: FUSO_DA_CLINICA,
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
@@ -70,4 +70,4 @@ function textoDoLembrete(inicio, agora) {
   };
 }
 
-module.exports = { textoDoLembrete, FUSO_DA_CLINICA: FUSO };
+module.exports = { textoDoLembrete };

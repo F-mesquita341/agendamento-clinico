@@ -130,14 +130,74 @@ describe('enviar', () => {
   });
 });
 
+describe('prazo de validade', () => {
+  const AGORA = new Date('2026-09-21T13:00:00Z');
+  const relogio = { agora: () => AGORA };
+
+  test('a mensagem expira no instante informado, nas três plataformas', async () => {
+    // Sem prazo, o FCM guarda a mensagem por até quatro semanas para aparelho
+    // desligado, e o lembrete de uma consulta poderia chegar depois dela.
+    const falso = mensageiro([true]);
+    const expiraEm = new Date(AGORA.getTime() + 20 * 60 * 60 * 1000); // daqui a 20 h
+
+    await new ServicoFcm({ messaging: falso, relogio }).enviar({ ...MENSAGEM, tokens: ['t1'], expiraEm });
+
+    const enviado = falso.chamadas[0];
+    expect(enviado.android).toEqual({ ttl: 20 * 60 * 60 * 1000 });
+    expect(enviado.webpush).toEqual({ headers: { TTL: String(20 * 60 * 60) } });
+    expect(enviado.apns).toEqual({
+      headers: { 'apns-expiration': String(Math.floor(expiraEm.getTime() / 1000)) },
+    });
+  });
+
+  test('prazo já vencido vira validade zero, não negativa', async () => {
+    const falso = mensageiro([true]);
+
+    await new ServicoFcm({ messaging: falso, relogio }).enviar({
+      ...MENSAGEM,
+      tokens: ['t1'],
+      expiraEm: new Date(AGORA.getTime() - 1000),
+    });
+
+    expect(falso.chamadas[0].android.ttl).toBe(0);
+  });
+});
+
+describe('lotes de 500', () => {
+  test('mais de 500 aparelhos vão em mais de uma chamada, e os resultados se somam', async () => {
+    // O FCM estoura acima de 500 destinos. Sem os lotes, um paciente com mais
+    // aparelhos que isso travaria o lembrete num ciclo sem fim.
+    const tokens = Array.from({ length: 501 }, (_, i) => `t${i}`);
+    const chamadas = [];
+    const falso = {
+      async sendEachForMulticast(mensagem) {
+        chamadas.push(mensagem.tokens);
+        const ultimoMorto = mensagem.tokens.includes('t500');
+        return {
+          successCount: mensagem.tokens.length - (ultimoMorto ? 1 : 0),
+          responses: mensagem.tokens.map((t) =>
+            t === 't500'
+              ? { success: false, error: { code: 'messaging/registration-token-not-registered' } }
+              : { success: true }
+          ),
+        };
+      },
+    };
+
+    const resultado = await new ServicoFcm({ messaging: falso }).enviar({ ...MENSAGEM, tokens });
+
+    expect(chamadas.map((c) => c.length)).toEqual([500, 1]);
+    expect(resultado).toEqual({ entregues: 500, invalidos: ['t500'] });
+  });
+});
+
 describe('ServicoNaoConfigurado', () => {
-  test('não envia e não estoura — a API sobe sem credencial em desenvolvimento', async () => {
-    const aviso = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const resultado = await new ServicoNaoConfigurado().enviar({ ...MENSAGEM, tokens: ['t1'] });
-
-    expect(resultado).toEqual({ entregues: 0, invalidos: [] });
-    expect(aviso).toHaveBeenCalled();
-    aviso.mockRestore();
+  test('ESTOURA, em vez de responder "zero entregues"', async () => {
+    // Responder zero parecia inofensivo: a rotina entenderia "ninguém
+    // recebeu", manteria a marca, e aquela consulta nunca mais seria lembrada.
+    // Estourando, a rotina desfaz a marca e a consulta volta à fila.
+    await expect(
+      new ServicoNaoConfigurado().enviar({ ...MENSAGEM, tokens: ['t1'] })
+    ).rejects.toThrow(/não configurado/);
   });
 });

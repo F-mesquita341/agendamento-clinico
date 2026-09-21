@@ -287,8 +287,13 @@ prévio. O trabalho incorpora as duas.
 
 | Rota | Acesso | O que faz |
 |---|---|---|
-| `POST /dispositivos` | token | Registra o aparelho — `{ token, plataforma }`, 201 |
-| `DELETE /dispositivos/:token` | token + dono | Revoga o aparelho, 204; aparelho alheio ou inexistente, 404 |
+| `POST /dispositivos` | token | Registra o aparelho — `{ token, plataforma }` → 201 `{ dispositivo: { id } }` |
+| `DELETE /dispositivos/:id` | token + dono | Revoga o aparelho, 204; aparelho alheio ou inexistente, 404 |
+
+O aparelho é revogado pelo **id**, e não pelo token: o token identifica o
+telefone, e o caminho da URL é o lugar mais registrado de uma requisição — log
+de acesso, proxies, histórico. Registro, reatribuição e revogação entram na
+auditoria, sempre sem o token.
 
 Uma rotina, a cada 15 minutos, avisa pelo Firebase Cloud Messaging quem tem
 consulta **confirmada** começando nas próximas 24 horas, e marca
@@ -298,7 +303,13 @@ rodada.
 **A marca é gravada ANTES do envio.** Marcando depois, uma queda entre o envio e
 a gravação faria a rodada seguinte reenviar. Marcando antes, a mesma queda perde
 o lembrete — que é o erro menos grave dos dois. Se o provedor recusar o envio, a
-marca é desfeita e a rodada seguinte tenta.
+marca é desfeita e a rodada seguinte tenta. Mas só o **envio** desfaz a marca:
+falha no que vem depois — auditar, apagar token morto — é registrada no log e a
+marca fica, porque o lembrete já saiu e desfazê-la o mandaria de novo.
+
+**A mensagem expira no começo da consulta.** Sem isso, o provedor a guarda por
+semanas para aparelho desligado, e o lembrete poderia chegar depois da consulta
+dizendo "amanhã".
 
 **O texto não revela dado de saúde.** "Você tem uma consulta amanhã às 14:30" —
 sem especialidade, sem profissional. Notificação aparece em tela bloqueada, e

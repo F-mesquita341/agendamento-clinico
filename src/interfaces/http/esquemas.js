@@ -10,13 +10,13 @@
  */
 
 const { z } = require('zod');
+const { FUSO_DA_CLINICA } = require('../../domain/Relogio');
 
 /**
- * Fuso civil da clínica parceira, em Quixadá (CE) — o mesmo usado no seed.
- * Sem horário de verão desde 2019, então o deslocamento é constante o ano todo
- * e pode ser escrito direto numa data sem hora.
+ * Deslocamento do fuso da clínica (ver `FUSO_DA_CLINICA` no domínio). Sem
+ * horário de verão desde 2019, é constante o ano todo e pode ser escrito direto
+ * numa data sem hora.
  */
-const FUSO_DA_CLINICA = 'America/Fortaleza';
 const DESLOCAMENTO_DA_CLINICA = '-03:00';
 
 /**

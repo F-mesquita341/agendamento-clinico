@@ -13,8 +13,9 @@
 
 const { RepositorioDeConsultas } = require('../../domain/repositorios');
 const { NaoEncontrado } = require('../../domain/erros');
-const { MOTIVO_CANCELAMENTO } = require('../../domain/Consulta');
-const { consultar, transacao } = require('./pool');
+const { MOTIVO_CANCELAMENTO, JANELA_DO_LEMBRETE_MS } = require('../../domain/Consulta');
+const { pool, consultar, transacao } = require('./pool');
+const { auditar } = require('./auditoria');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 const { RepositorioDeHorariosPg, paraHorario } = require('./RepositorioDeHorariosPg');
 const { paraProfissional } = require('./RepositorioDeProfissionaisPg');
@@ -218,6 +219,11 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
    * sob bloqueio em `reservarLembrete`.
    */
   async aguardandoLembrete(agora, limite) {
+    // O limite da janela vem da MESMA constante que `precisaDeLembrete` usa.
+    // Escrito como `INTERVAL '24 hours'` aqui, as duas regras podiam divergir
+    // em silêncio: mudar a antecedência no domínio passaria nos testes de
+    // unidade, e a varredura continuaria trazendo só as consultas de 24 h.
+    const ate = new Date(agora.getTime() + JANELA_DO_LEMBRETE_MS);
     const { rows } = await consultar(
       `SELECT c.id
          FROM consulta c
@@ -225,10 +231,10 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
         WHERE c.status = 'confirmada'
           AND c.lembrete_enviado_em IS NULL
           AND h.inicio > $1
-          AND h.inicio <= $1 + INTERVAL '24 hours'
+          AND h.inicio <= $3
         ORDER BY h.inicio
         LIMIT $2`,
-      [agora, limite]
+      [agora, limite, ate]
     );
     return rows.map((linha) => Number(linha.id));
   }
@@ -295,11 +301,13 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
    * identificam o telefone da pessoa.
    */
   async registrarLembreteEnviado(consultaId, aparelhos) {
-    await consultar(
-      `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
-       VALUES ('sistema', NULL, 'lembrete.enviado', 'consulta', $1, $2)`,
-      [consultaId, { aparelhos }]
-    );
+    await auditar(pool, {
+      atorTipo: 'sistema',
+      acao: 'lembrete.enviado',
+      entidade: 'consulta',
+      entidadeId: consultaId,
+      detalhe: { aparelhos },
+    });
   }
 }
 
