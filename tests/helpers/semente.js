@@ -17,7 +17,7 @@ const { VERSAO_TERMO_CONSENTIMENTO } = require('../../src/domain/Paciente');
 /** Ordem inversa às dependências de chave estrangeira. */
 async function limpar() {
   await consultar(`
-    TRUNCATE auditoria, pagamento, device_token, consulta, horario,
+    TRUNCATE auditoria, pagamento, dispositivo, consulta, horario,
              profissional, especialidade, paciente, clinica
     RESTART IDENTITY CASCADE;
   `);

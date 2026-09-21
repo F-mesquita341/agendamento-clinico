@@ -156,6 +156,42 @@ class RepositorioDeConsultas {
   async expirarSeVencida(_consultaId, _agora) {
     naoImplementado('RepositorioDeConsultas.expirarSeVencida');
   }
+
+  /**
+   * Ids das consultas que merecem lembrete agora — confirmadas, ainda não
+   * avisadas, começando nas próximas 24 horas.
+   *
+   * @returns {Promise<Array<number>>}
+   */
+  async aguardandoLembrete(_agora, _limite) {
+    naoImplementado('RepositorioDeConsultas.aguardandoLembrete');
+  }
+
+  /**
+   * Marca o lembrete como enviado, sob bloqueio, reconferindo
+   * `Consulta.precisaDeLembrete`. É a marca que impede o reenvio a cada rodada.
+   *
+   * @returns {Promise<{consultaId: number, pacienteId: number, inicio: Date}|null>}
+   *          null quando a consulta deixou de merecer entre a varredura e o
+   *          bloqueio.
+   */
+  async reservarLembrete(_consultaId, _agora) {
+    naoImplementado('RepositorioDeConsultas.reservarLembrete');
+  }
+
+  /** Desfaz a marca quando o envio falhou por motivo momentâneo. */
+  async desmarcarLembrete(_consultaId) {
+    naoImplementado('RepositorioDeConsultas.desmarcarLembrete');
+  }
+
+  /**
+   * Audita o envio DEPOIS de ele ter acontecido — a marca é gravada antes, e
+   * auditar junto dela diria "enviado" antes de enviar. Guarda a contagem de
+   * aparelhos, nunca os tokens.
+   */
+  async registrarLembreteEnviado(_consultaId, _aparelhos) {
+    naoImplementado('RepositorioDeConsultas.registrarLembreteEnviado');
+  }
 }
 
 class RepositorioDeEspecialidades {
@@ -226,10 +262,60 @@ class RepositorioDePacientes {
   }
 }
 
+/**
+ * Aparelhos que recebem notificação push.
+ *
+ * Um DISPOSITIVO é `{ id, pacienteId, token, plataforma }`. O token é
+ * identificador de aparelho — dado pessoal — e não sai daqui para log, resposta
+ * de API nem auditoria.
+ */
+class RepositorioDeDispositivos {
+  /**
+   * Registra o aparelho. Se o token já existir, REATRIBUI ao paciente informado
+   * em vez de criar outra linha: um aparelho que trocou de conta não pode
+   * continuar recebendo o lembrete do dono anterior.
+   *
+   * @param {{pacienteId: number, token: string, plataforma: string}} _dados
+   * @returns {Promise<void>}
+   */
+  async registrar(_dados) {
+    naoImplementado('RepositorioDeDispositivos.registrar');
+  }
+
+  /**
+   * Remove o token, mas só se ele pertencer a este paciente.
+   *
+   * @returns {Promise<boolean>} false quando não havia o que remover — a rota
+   *          responde 404 nos dois casos, para ninguém descobrir token alheio
+   *          por tentativa.
+   */
+  async revogar(_pacienteId, _token) {
+    naoImplementado('RepositorioDeDispositivos.revogar');
+  }
+
+  /** @returns {Promise<Array<string>>} os tokens do paciente */
+  async doPaciente(_pacienteId) {
+    naoImplementado('RepositorioDeDispositivos.doPaciente');
+  }
+
+  /**
+   * Apaga tokens que o provedor reportou como inexistentes — aplicativo
+   * desinstalado, token expirado. Sem isso a tabela só cresce, e cada envio
+   * carrega destinos mortos.
+   *
+   * @param {Array<string>} _tokens
+   * @returns {Promise<number>} quantos foram apagados
+   */
+  async esquecer(_tokens) {
+    naoImplementado('RepositorioDeDispositivos.esquecer');
+  }
+}
+
 module.exports = {
   RepositorioDeHorarios,
   RepositorioDeConsultas,
   RepositorioDeEspecialidades,
   RepositorioDeProfissionais,
   RepositorioDePacientes,
+  RepositorioDeDispositivos,
 };
