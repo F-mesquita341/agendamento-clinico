@@ -208,6 +208,39 @@ class ConsultasFalsas extends RepositorioDeConsultas {
     return true;
   }
 
+  async aguardandoLembrete(agora, limite) {
+    return [...this.itens.values()]
+      .filter((c) => c.precisaDeLembrete(this.horarioDaConsulta.get(String(c.id))?.inicio, agora))
+      .sort((a, b) => {
+        const inicioA = this.horarioDaConsulta.get(String(a.id))?.inicio ?? 0;
+        const inicioB = this.horarioDaConsulta.get(String(b.id))?.inicio ?? 0;
+        return inicioA - inicioB;
+      })
+      .slice(0, limite)
+      .map((c) => c.id);
+  }
+
+  async reservarLembrete(consultaId, agora) {
+    const consulta = this.itens.get(String(consultaId));
+    const inicio = this.horarioDaConsulta.get(String(consultaId))?.inicio;
+    // Mesma condição que o adaptador reavalia sob bloqueio: entre a varredura e
+    // este ponto, a consulta pode ter sido cancelada ou já avisada.
+    if (!consulta || !consulta.precisaDeLembrete(inicio, agora)) return null;
+
+    consulta.lembreteEnviadoEm = agora;
+    return { consultaId: consulta.id, pacienteId: consulta.pacienteId, inicio };
+  }
+
+  async desmarcarLembrete(consultaId) {
+    const consulta = this.itens.get(String(consultaId));
+    if (consulta) consulta.lembreteEnviadoEm = null;
+  }
+
+  async registrarLembreteEnviado(consultaId, aparelhos) {
+    this.lembretesAuditados ??= [];
+    this.lembretesAuditados.push({ consultaId, aparelhos });
+  }
+
   /** O banco exige motivo em toda consulta cancelada; o dublê também. */
   async cancelarComMotivo(consulta, motivo) {
     consulta.status = STATUS_CONSULTA.CANCELADA;
