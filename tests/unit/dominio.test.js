@@ -116,15 +116,43 @@ describe('Consulta', () => {
     );
   });
 
-  test('só consulta confirmada e ainda sem aviso precisa de lembrete', () => {
-    expect(new Consulta({ ...base, status: 'confirmada' }).precisaDeLembrete()).toBe(true);
-    expect(new Consulta({ ...base, status: 'pendente_pagamento' }).precisaDeLembrete()).toBe(false);
-    expect(
-      new Consulta({
-        ...base,
-        status: 'confirmada',
-        lembreteEnviadoEm: new Date(),
-      }).precisaDeLembrete()
-    ).toBe(false);
+  describe('precisaDeLembrete', () => {
+    const AGORA = new Date('2026-09-21T10:00:00-03:00');
+    const daquiA = (ms) => new Date(AGORA.getTime() + ms);
+    const HORAS = 60 * 60 * 1000;
+
+    const confirmada = (extra = {}) => new Consulta({ ...base, status: 'confirmada', ...extra });
+
+    test('confirmada, sem aviso e começando dentro de 24 h', () => {
+      expect(confirmada().precisaDeLembrete(daquiA(20 * HORAS), AGORA)).toBe(true);
+    });
+
+    test('não confirmada não recebe lembrete', () => {
+      const pendente = new Consulta({ ...base, status: 'pendente_pagamento' });
+
+      expect(pendente.precisaDeLembrete(daquiA(20 * HORAS), AGORA)).toBe(false);
+    });
+
+    test('já avisada não recebe de novo — é o que impede o reenvio a cada rodada', () => {
+      const avisada = confirmada({ lembreteEnviadoEm: new Date() });
+
+      expect(avisada.precisaDeLembrete(daquiA(20 * HORAS), AGORA)).toBe(false);
+    });
+
+    test('consulta de semana que vem ainda não é lembrete', () => {
+      // Sem esta condição, a primeira rodada da rotina avisaria TODA consulta
+      // confirmada da agenda, com semanas de antecedência, e nenhuma delas
+      // receberia o aviso na véspera — a marca só serve uma vez.
+      expect(confirmada().precisaDeLembrete(daquiA(7 * 24 * HORAS), AGORA)).toBe(false);
+    });
+
+    test('consulta que já começou não recebe lembrete', () => {
+      expect(confirmada().precisaDeLembrete(daquiA(-1), AGORA)).toBe(false);
+    });
+
+    test('a borda das 24 h conta como dentro', () => {
+      expect(confirmada().precisaDeLembrete(daquiA(24 * HORAS), AGORA)).toBe(true);
+      expect(confirmada().precisaDeLembrete(daquiA(24 * HORAS + 1), AGORA)).toBe(false);
+    });
   });
 });
