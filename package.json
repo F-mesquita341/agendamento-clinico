@@ -20,6 +20,7 @@
     "verificar:token": "node scripts/verificar-token-real.js",
     "verificar:sandbox": "node scripts/verificar-sandbox-mp.js",
     "verificar:portao": "node scripts/verificar-portao-pagamento.js",
+    "pagina:token": "node scripts/servir-pagina-de-token.js",
     "carga": "node tests/carga/concorrencia.js"
   },
   "dependencies": {

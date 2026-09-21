@@ -23,7 +23,10 @@ const { ConsentimentoObrigatorio } = require('./erros');
  * registrado com ela, e é isso que permite provar a qual texto cada pessoa
  * consentiu.
  */
-const VERSAO_TERMO_CONSENTIMENTO = '2026-09-v1';
+// v2: acrescenta o identificador do aparelho aos dados coletados e diz o que
+// o lembrete mostra — Etapa 9. Quem aceitou a v1 continua cadastrado; a versão
+// só é exigida no cadastro.
+const VERSAO_TERMO_CONSENTIMENTO = '2026-09-v2';
 
 class Paciente {
   constructor({

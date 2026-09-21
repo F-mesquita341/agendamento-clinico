@@ -126,6 +126,8 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run test:unit` | Só os testes de unidade, sem banco |
 | `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
 | `npm run verificar:sandbox` | Prova a credencial do Mercado Pago contra a API real: confirma que é conta de teste, cria um checkout e confere o pagamento |
+| `npm run verificar:portao` | Portão da Etapa 8 contra a API publicada: agenda, paga em sandbox e confere a confirmação pelo webhook |
+| `npm run pagina:token` | Página de prova da Etapa 9: registra o navegador como aparelho e recebe o lembrete (ver abaixo) |
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
 
 ## Convenções da API
@@ -276,6 +278,60 @@ referência aleatória e o prazo. Nada do paciente.
 | `RESERVA_EXPIRADA` (422) | O prazo para pagar terminou |
 | `PAGAMENTO_INDISPONIVEL` (503, `tentar_novamente`) | O Mercado Pago não respondeu, ou não está configurado |
 | `ASSINATURA_INVALIDA` (401) | Aviso sem assinatura válida no webhook |
+
+## Lembrete de consulta
+
+A Seção 3.2 do projeto aponta o lembrete automatizado entre as intervenções de
+maior efetividade documentada contra o absenteísmo, ao lado do pagamento
+prévio. O trabalho incorpora as duas.
+
+| Rota | Acesso | O que faz |
+|---|---|---|
+| `POST /dispositivos` | token | Registra o aparelho — `{ token, plataforma }`, 201 |
+| `DELETE /dispositivos/:token` | token + dono | Revoga o aparelho, 204; aparelho alheio ou inexistente, 404 |
+
+Uma rotina, a cada 15 minutos, avisa pelo Firebase Cloud Messaging quem tem
+consulta **confirmada** começando nas próximas 24 horas, e marca
+`lembrete_enviado_em`. É essa marca que impede o mesmo lembrete de sair a cada
+rodada.
+
+**A marca é gravada ANTES do envio.** Marcando depois, uma queda entre o envio e
+a gravação faria a rodada seguinte reenviar. Marcando antes, a mesma queda perde
+o lembrete — que é o erro menos grave dos dois. Se o provedor recusar o envio, a
+marca é desfeita e a rodada seguinte tenta.
+
+**O texto não revela dado de saúde.** "Você tem uma consulta amanhã às 14:30" —
+sem especialidade, sem profissional. Notificação aparece em tela bloqueada, e
+quem estiver por perto lê (LGPD, Art. 11).
+
+**Um aparelho que troca de conta é reatribuído**, e não duplicado: o token é
+único na tabela. Com duas linhas, o dono anterior continuaria recebendo naquele
+telefone o lembrete das consultas dele.
+
+Tokens que o provedor diz não existirem mais — aplicativo desinstalado — são
+apagados. Falha momentânea não apaga nada: um token bom apagado por engano
+deixaria a pessoa sem lembrete para sempre, em silêncio.
+
+**Limitação do plano gratuito:** a rotina só roda com a API acordada, e no
+Render ela hiberna depois de 15 minutos. Um lembrete pode sair atrasado, ou não
+sair. As sessões com participantes devem começar acordando o serviço.
+
+### Prova com a página de teste
+
+O aplicativo Flutter é a Fase 4 e ainda não existe, então a prova da etapa usa
+uma página web que faz o mesmo que ele fará: entra no Firebase, obtém o token do
+FCM e se registra na API. Ela precisa de quatro valores no `.env`, todos da tela
+**Configurações do projeto** do console do Firebase — `FIREBASE_WEB_API_KEY`,
+`FIREBASE_WEB_APP_ID` e `FIREBASE_WEB_SENDER_ID` no app Web, e
+`FIREBASE_WEB_VAPID_KEY` em **Cloud Messaging → Certificados push da Web**.
+Nenhum deles é segredo: é a configuração pública de um app web.
+
+```bash
+npm run pagina:token
+```
+
+Abra `http://localhost:4000` no Chrome ou no Edge, em janela **normal** — janela
+anônima e o Brave bloqueiam as notificações do Firebase.
 
 ## Publicação
 

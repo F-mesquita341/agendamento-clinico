@@ -1191,3 +1191,74 @@ sintoma, e **não** a implementei: escrevi o log primeiro e esperei o fato. Foi
 o oposto do que aconteceu com a trava do `live_mode`, que nasceu de uma
 suposição sobre o comportamento do provedor e sobreviveu até a primeira
 ligação real. Duas semanas atrás isso teria virado um `if` adivinhado.
+
+## 21/09/2026 — Etapa 9: lembrete de consulta
+
+O lembrete das 24 horas, pelo Firebase Cloud Messaging. É a segunda das duas
+intervenções contra o absenteísmo que a Seção 3.2 do projeto aponta como de
+maior efetividade documentada — a primeira, o pagamento prévio, é a Etapa 8.
+
+**O terreno estava preparado havia seis etapas, e eu quase não vi.** A Etapa 2
+deixou `lembrete_enviado_em` com índice próprio e `precisaDeLembrete()` com
+teste. E a migration 003 criou `device_token`, prevendo esta etapa, sem que
+nenhuma linha de código jamais a lesse. Eu tinha acabado de criar uma segunda
+tabela para a mesma coisa quando reparei. Desfiz; a migration 009 passou a
+**completar** a existente — renomeada para `dispositivo`, que era a única tabela
+com nome em inglês no esquema, com restrição na plataforma. A lição é pequena e
+vale: antes de criar, procurar o que as etapas anteriores deixaram pronto.
+
+**Três decisões de desenho carregam a etapa.**
+
+A marca é gravada ANTES do envio. O portão exige "uma única vez": marcando
+depois, uma queda entre o envio e a gravação faria a rodada seguinte reenviar;
+marcando antes, a mesma queda perde o lembrete. Entre duplicata e perda, a perda
+é o erro menos grave. Para a falha que dá para distinguir — o provedor recusar —
+a marca é desfeita e a rodada seguinte tenta.
+
+O texto mora no domínio, como o item genérico enviado ao Mercado Pago. "Você tem
+uma consulta amanhã às 14:30", sem especialidade nem profissional: notificação
+aparece em tela bloqueada, e quem estiver por perto lê. Sendo função pura, a
+regra virou teste — a assinatura nem aceita esses dados.
+
+O token é único na tabela, e registrar um token existente REATRIBUI. Telefone
+passa de mão; com duas linhas, o dono anterior continuaria recebendo ali o
+lembrete das consultas dele, e quem está com o aparelho veria que outra pessoa
+tem consulta marcada.
+
+**A revisão local achou três defeitos meus, e o mais sério era silencioso.**
+Eu tinha posto `messaging/invalid-argument` na lista de códigos que autorizam
+apagar um token. Ele quase sempre é token malformado — mas é também o que o FCM
+devolve quando a MENSAGEM é inválida, e a mensagem é a mesma para todos os
+aparelhos. Um erro no nosso payload apagaria, de uma vez, todos os aparelhos do
+paciente: um defeito nosso virando perda de dado de quem não tem nada com isso,
+sem erro nenhum depois. Os outros dois: a auditoria registrava `lembrete.enviado`
+com zero aparelhos quando todos estavam mortos, e a marca podia ser desfeita por
+quem não a tinha gravado. Cada correção foi confirmada reintroduzindo o defeito.
+A revisão foi feita por mim, autor do código, e isso é limitação: nas Etapas 6 e
+7 foram os revisores independentes que acharam o que eu não tinha visto.
+
+**Uma das seis reintroduções de defeito não derrubou o teste de integração**, e
+vale registrar por quê. Tirar a janela de 24 h do domínio só derrubou os testes
+de unidade: a consulta SQL da varredura também filtra por 24 h, e a consulta de
+semana que vem nem chega ao domínio. Duas redes para a mesma regra, como o CHECK
+do banco na Etapa 8 — e cada uma tem seu teste.
+
+**O termo de consentimento foi para a v2.** Ele prometia lembretes sem dizer que
+guarda o identificador do aparelho. Agora diz, e diz também o que o lembrete
+mostra e por quê. A versão só é conferida no cadastro, então quem aceitou a v1
+continua cadastrado — o que deixa uma questão em aberto: quem aceitou a v1 não
+consentiu com o token do aparelho. Hoje só há contas de teste nessa situação,
+e os participantes das sessões se cadastram direto na v2.
+
+**A prova usa uma página web**, e não um aparelho Android, porque o aplicativo
+Flutter é a Fase 4. A página faz o que ele fará — entra no Firebase, obtém o
+token do FCM e se registra na API — e recebe a notificação no navegador. Isso
+prova o caminho API → FCM → dispositivo por inteiro. O "aparelho Android real"
+do portão fica pendente até o aplicativo existir.
+
+**Limitação que pesa mais aqui do que no pagamento:** a rotina só roda com a API
+acordada, e no plano gratuito ela hiberna depois de 15 minutos. O intervalo foi
+reduzido de uma hora para 15 minutos para aumentar a chance de alcançar a janela
+acordada, e a rotina roda também na subida. Mas o lembrete pode atrasar, ou não
+sair. A página de prova consulta a rota de saúde a cada 4 minutos enquanto
+espera — é ferramenta de teste, e isso não esconde a limitação do uso real.
