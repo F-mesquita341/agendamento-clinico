@@ -230,6 +230,21 @@ describe('aparelhos que o provedor recusa', () => {
 
     expect((await auditoriaDeLembrete())[0].detalhe).toEqual({ aparelhos: 1 });
   });
+
+  test('TODOS os aparelhos mortos não vira "enviado" nem linha de auditoria', async () => {
+    // Ninguém recebeu. Contar como enviado e auditar "lembrete.enviado" com
+    // zero aparelhos seria registrar entrega que não houve. A marca fica: os
+    // tokens acabaram de ser apagados, não há o que reenviar.
+    const { consultaId } = await cenario({ aparelhos: ['morto-1', 'morto-2'] });
+    notificador.mortos.add('morto-1').add('morto-2');
+
+    const resultado = await rotina.executar();
+
+    expect(resultado).toMatchObject({ enviados: 0, semAparelho: 1 });
+    expect(await auditoriaDeLembrete()).toEqual([]);
+    expect(await tokensGuardados()).toEqual([]);
+    expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);
+  });
 });
 
 describe('quando o provedor falha', () => {
@@ -249,6 +264,27 @@ describe('quando o provedor falha', () => {
 
     expect(segunda.enviados).toBe(1);
     expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);
+  });
+
+  test('falha ANTES da marca não apaga marca nenhuma', async () => {
+    // Se o próprio `reservarLembrete` falhar, não há marca nossa para desfazer.
+    // Chamar `desmarcarLembrete` ali seria apagar uma marca de origem
+    // desconhecida — e apagá-la faria o lembrete sair de novo.
+    const { consultaId } = await cenario();
+    const original = consultas.reservarLembrete.bind(consultas);
+    const desmarcar = jest.spyOn(consultas, 'desmarcarLembrete');
+    jest
+      .spyOn(consultas, 'reservarLembrete')
+      .mockRejectedValueOnce(new Error('banco indisponível'));
+
+    const resultado = await rotina.executar();
+
+    expect(resultado).toMatchObject({ adiados: 1 });
+    expect(desmarcar).not.toHaveBeenCalled();
+    expect(await marcaDoLembrete(consultaId)).toBeNull();
+
+    consultas.reservarLembrete = original;
+    desmarcar.mockRestore();
   });
 
   test('uma consulta problemática não impede as outras', async () => {

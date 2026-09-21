@@ -27,8 +27,20 @@ const { obterAppDoFirebase } = require('../firebase/app');
 const TOKEN_MORTO = new Set([
   'messaging/registration-token-not-registered',
   'messaging/invalid-registration-token',
-  'messaging/invalid-argument',
 ]);
+
+/*
+ * `messaging/invalid-argument` NÃO está na lista, e chegou a estar.
+ *
+ * Ele quase sempre significa token malformado — mas também é o que o FCM
+ * devolve quando a MENSAGEM é inválida. E a mensagem é a mesma para todos os
+ * aparelhos: um defeito nosso no payload faria todos falharem com esse código
+ * e apagaríamos, de uma vez, todos os aparelhos do paciente. Um erro nosso
+ * viraria perda de dado de quem não tem nada com isso.
+ *
+ * Deixá-lo de fora custa tokens mortos sobrando na tabela até o FCM devolver um
+ * dos dois códigos específicos. É o lado barato de errar.
+ */
 
 class ServicoFcm extends ServicoDeNotificacao {
   /**

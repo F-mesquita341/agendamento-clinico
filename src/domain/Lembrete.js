@@ -27,7 +27,9 @@ const FORMATO = new Intl.DateTimeFormat('pt-BR', {
   day: '2-digit',
   hour: '2-digit',
   minute: '2-digit',
-  hour12: false,
+  // h23 explícito: com `hour12: false` sozinho, a meia-noite sai como "24" em
+  // alguns ambientes, e aí a hora e a data discordariam entre si.
+  hourCycle: 'h23',
 });
 
 /** As partes da data já no fuso da clínica, como números. */
@@ -40,8 +42,7 @@ function partesEm(data) {
   return {
     dia: `${partes.year}-${partes.month}-${partes.day}`,
     diaEMes: `${partes.day}/${partes.month}`,
-    // 24h à meia-noite aparece como "24" em alguns ambientes; normaliza.
-    hora: `${partes.hour === '24' ? '00' : partes.hour}:${partes.minute}`,
+    hora: `${partes.hour}:${partes.minute}`,
   };
 }
 

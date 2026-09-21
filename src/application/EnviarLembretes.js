@@ -43,8 +43,12 @@ class EnviarLembretes {
     const resultado = { enviados: 0, semAparelho: 0, adiados: 0, falhas: 0 };
 
     for (const consultaId of candidatas) {
+      // Só desfaz a marca quem a gravou. Se o próprio `reservarLembrete`
+      // falhar, não há marca nossa para desfazer, e chamar `desmarcarLembrete`
+      // ali seria apagar uma marca de origem desconhecida.
+      let reservada = null;
       try {
-        const reservada = await this.consultas.reservarLembrete(consultaId, agora);
+        reservada = await this.consultas.reservarLembrete(consultaId, agora);
         // Outra rodada chegou primeiro, ou a consulta mudou de estado entre a
         // varredura e o bloqueio.
         if (!reservada) continue;
@@ -59,6 +63,7 @@ class EnviarLembretes {
         // Uma consulta problemática não impede as outras de serem avisadas.
         resultado.adiados += 1;
         console.error(`Lembrete da consulta ${consultaId} adiado:`, erro.message);
+        if (!reservada) continue;
         try {
           await this.consultas.desmarcarLembrete(consultaId);
         } catch (aoDesmarcar) {
@@ -87,7 +92,7 @@ class EnviarLembretes {
     }
 
     const { titulo, corpo } = textoDoLembrete(new Date(inicio), agora);
-    const { invalidos } = await this.notificador.enviar({
+    const { entregues, invalidos } = await this.notificador.enviar({
       tokens,
       titulo,
       corpo,
@@ -98,7 +103,15 @@ class EnviarLembretes {
     if (invalidos.length > 0) {
       await this.dispositivos.esquecer(invalidos);
     }
-    await this.consultas.registrarLembreteEnviado(consultaId, tokens.length - invalidos.length);
+
+    // Todos os aparelhos estavam mortos: ninguém recebeu. Contar como enviado e
+    // auditar "lembrete.enviado" com zero aparelhos seria registrar entrega que
+    // não houve — e a auditoria deste trabalho existe para ser confiável. A
+    // marca fica de pé: os tokens acabaram de ser apagados, não há o que
+    // reenviar, e insistir faria a rotina varrer esta consulta para sempre.
+    if (entregues === 0) return false;
+
+    await this.consultas.registrarLembreteEnviado(consultaId, entregues);
     return true;
   }
 }

@@ -71,7 +71,6 @@ describe('enviar', () => {
   test.each([
     'messaging/registration-token-not-registered',
     'messaging/invalid-registration-token',
-    'messaging/invalid-argument',
   ])('token recusado com %s é apagável', async (codigo) => {
     const falso = mensageiro([true, codigo]);
 
@@ -81,6 +80,22 @@ describe('enviar', () => {
     });
 
     expect(resultado).toEqual({ entregues: 1, invalidos: ['morto'] });
+  });
+
+  test('invalid-argument NÃO apaga o token, e isso é deliberado', async () => {
+    // Ele quase sempre é token malformado — mas é também o que o FCM devolve
+    // quando a MENSAGEM é inválida. A mensagem é a mesma para todos os
+    // aparelhos: um defeito nosso no payload faria todos falharem assim, e
+    // apagaríamos de uma vez todos os aparelhos do paciente. Um erro nosso
+    // viraria perda de dado de quem não tem nada com isso.
+    const falso = mensageiro(['messaging/invalid-argument', 'messaging/invalid-argument']);
+
+    const resultado = await new ServicoFcm({ messaging: falso }).enviar({
+      ...MENSAGEM,
+      tokens: ['aparelho-1', 'aparelho-2'],
+    });
+
+    expect(resultado.invalidos).toEqual([]);
   });
 
   test.each([
