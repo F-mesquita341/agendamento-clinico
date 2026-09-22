@@ -1191,3 +1191,122 @@ sintoma, e **não** a implementei: escrevi o log primeiro e esperei o fato. Foi
 o oposto do que aconteceu com a trava do `live_mode`, que nasceu de uma
 suposição sobre o comportamento do provedor e sobreviveu até a primeira
 ligação real. Duas semanas atrás isso teria virado um `if` adivinhado.
+
+## 21/09/2026 — Etapa 9: lembrete de consulta
+
+O lembrete das 24 horas, pelo Firebase Cloud Messaging. É a segunda das duas
+intervenções contra o absenteísmo que a Seção 3.2 do projeto aponta como de
+maior efetividade documentada — a primeira, o pagamento prévio, é a Etapa 8.
+
+**O terreno estava preparado havia seis etapas, e eu quase não vi.** A Etapa 2
+deixou `lembrete_enviado_em` com índice próprio e `precisaDeLembrete()` com
+teste. E a migration 003 criou `device_token`, prevendo esta etapa, sem que
+nenhuma linha de código jamais a lesse. Eu tinha acabado de criar uma segunda
+tabela para a mesma coisa quando reparei. Desfiz; a migration 009 passou a
+**completar** a existente — renomeada para `dispositivo`, que era a única tabela
+com nome em inglês no esquema, com restrição na plataforma. A lição é pequena e
+vale: antes de criar, procurar o que as etapas anteriores deixaram pronto.
+
+**Três decisões de desenho carregam a etapa.**
+
+A marca é gravada ANTES do envio. O portão exige "uma única vez": marcando
+depois, uma queda entre o envio e a gravação faria a rodada seguinte reenviar;
+marcando antes, a mesma queda perde o lembrete. Entre duplicata e perda, a perda
+é o erro menos grave. Para a falha que dá para distinguir — o provedor recusar —
+a marca é desfeita e a rodada seguinte tenta.
+
+O texto mora no domínio, como o item genérico enviado ao Mercado Pago. "Você tem
+uma consulta amanhã às 14:30", sem especialidade nem profissional: notificação
+aparece em tela bloqueada, e quem estiver por perto lê. Sendo função pura, a
+regra virou teste — a assinatura nem aceita esses dados.
+
+O token é único na tabela, e registrar um token existente REATRIBUI. Telefone
+passa de mão; com duas linhas, o dono anterior continuaria recebendo ali o
+lembrete das consultas dele, e quem está com o aparelho veria que outra pessoa
+tem consulta marcada.
+
+**A revisão local achou três defeitos meus, e o mais sério era silencioso.**
+Eu tinha posto `messaging/invalid-argument` na lista de códigos que autorizam
+apagar um token. Ele quase sempre é token malformado — mas é também o que o FCM
+devolve quando a MENSAGEM é inválida, e a mensagem é a mesma para todos os
+aparelhos. Um erro no nosso payload apagaria, de uma vez, todos os aparelhos do
+paciente: um defeito nosso virando perda de dado de quem não tem nada com isso,
+sem erro nenhum depois. Os outros dois: a auditoria registrava `lembrete.enviado`
+com zero aparelhos quando todos estavam mortos, e a marca podia ser desfeita por
+quem não a tinha gravado. Cada correção foi confirmada reintroduzindo o defeito.
+A revisão foi feita por mim, autor do código, e isso é limitação: nas Etapas 6 e
+7 foram os revisores independentes que acharam o que eu não tinha visto.
+
+**Uma das seis reintroduções de defeito não derrubou o teste de integração**, e
+vale registrar por quê. Tirar a janela de 24 h do domínio só derrubou os testes
+de unidade: a consulta SQL da varredura também filtra por 24 h, e a consulta de
+semana que vem nem chega ao domínio. Duas redes para a mesma regra, como o CHECK
+do banco na Etapa 8 — e cada uma tem seu teste.
+
+**O termo de consentimento foi para a v2.** Ele prometia lembretes sem dizer que
+guarda o identificador do aparelho. Agora diz, e diz também o que o lembrete
+mostra e por quê. A versão só é conferida no cadastro, então quem aceitou a v1
+continua cadastrado — o que deixa uma questão em aberto: quem aceitou a v1 não
+consentiu com o token do aparelho. Hoje só há contas de teste nessa situação,
+e os participantes das sessões se cadastram direto na v2.
+
+**A prova usa uma página web**, e não um aparelho Android, porque o aplicativo
+Flutter é a Fase 4. A página faz o que ele fará — entra no Firebase, obtém o
+token do FCM e se registra na API — e recebe a notificação no navegador. Isso
+prova o caminho API → FCM → dispositivo por inteiro. O "aparelho Android real"
+do portão fica pendente até o aplicativo existir.
+
+**Limitação que pesa mais aqui do que no pagamento:** a rotina só roda com a API
+acordada, e no plano gratuito ela hiberna depois de 15 minutos. O intervalo foi
+reduzido de uma hora para 15 minutos para aumentar a chance de alcançar a janela
+acordada, e a rotina roda também na subida. Mas o lembrete pode atrasar, ou não
+sair. A página de prova consulta a rota de saúde a cada 4 minutos enquanto
+espera — é ferramenta de teste, e isso não esconde a limitação do uso real.
+
+## 21/09/2026 — Revisão detalhada da Etapa 9
+
+Tentei a revisão com nove revisores independentes; oito morreram no limite de
+sessão da conta, e a revisão acabou feita por mim, aproveitando os achados do
+único que terminou (reúso). Quatorze achados, todos corrigidos.
+
+**O mais sério contrariava o portão da etapa.** Se o lembrete saísse e, em
+seguida, a gravação da auditoria falhasse, o mesmo `catch` que desfaz a marca
+em falha de envio a desfazia também — e a rodada seguinte mandava o lembrete de
+novo. Eu tinha protegido a falha ANTES da marca e deixado aberta a falha DEPOIS
+do envio. Agora só o envio desfaz a marca; auditar e apagar token morto viraram
+contabilidade, que registra o erro no log e não mexe na marca.
+
+**O segundo era de semântica do provedor.** A mensagem ia sem prazo de
+validade, e o FCM guarda mensagem de aparelho desligado por até quatro semanas.
+Um lembrete "amanhã às 08:00" podia chegar dias depois da consulta — falso duas
+vezes, porque o "amanhã" é calculado no envio e não na entrega. Agora a
+mensagem expira no começo da consulta, nas três plataformas.
+
+**Os dois pontos que estavam em aberto foram decididos.** O aparelho é revogado
+pelo id, e não pelo token: o caminho da URL é o lugar mais registrado de uma
+requisição. Corpo em DELETE tiraria o token da URL também, mas não tem
+significado definido no HTTP e pode ser descartado no caminho. E registro,
+reatribuição e revogação passaram a ser auditados, sem o token.
+
+**Uma descoberta de ambiente na migration.** Renomear a tabela não renomeia
+restrições nem sequência, e elas continuavam `device_token_*`. Ao corrigir,
+apareceu que o PostgreSQL 18 (o do Neon) registra também as restrições NOT NULL
+como restrições nomeadas, e o 16 (o da integração contínua) não. A renomeação
+virou varredura, porque uma lista fixa quebraria numa das versões.
+
+**Dois erros meus apanhados antes do commit.** Escrevi num comentário que a CTE
+do registro impedia dois registros simultâneos de verem "sem dono" — não impede,
+porque ela vê o banco como estava no início da instrução; o comentário agora
+diz a verdade e o custo (uma linha de auditoria repetida, inofensiva). E deixei
+um `agora` vazar para a assinatura de `enviar`, que passou para o construtor.
+
+Confirmação por reintrodução: nove defeitos em duas rodadas, cada um derrubando
+exatamente os seus testes. Uma correção ficou sem essa prova, e por um motivo
+que vale dizer: a janela da varredura passou a vir da mesma constante do
+domínio, mas reintroduzir o `INTERVAL '24 hours'` escrito à mão não muda
+comportamento nenhum enquanto os dois valores forem iguais. O ganho é impedir
+divergência futura — algo que um teste só enxergaria mudando a constante.
+
+Ambiente: a rede de onde trabalhei hoje bloqueia a porta 5432, e o Neon ficou
+inalcançável por TCP. A suíte rodou por WebSocket (`TRANSPORTE_BANCO=websocket`),
+que o projeto já previa desde a Etapa 1 exatamente para isso.

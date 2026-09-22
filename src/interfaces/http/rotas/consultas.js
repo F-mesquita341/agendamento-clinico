@@ -32,6 +32,7 @@ const { RepositorioDePacientesPg } = require('../../../infra/db/RepositorioDePac
 const { NaoEncontrado, AcessoNegado } = require('../../../domain/erros');
 const { criarAutenticar } = require('../middlewares/autenticar');
 const { criarCarregarPaciente } = require('../middlewares/carregarPaciente');
+const { semCache } = require('../middlewares/semCache');
 const { validar } = require('../validacao');
 const { objetoEstrito, inteiroPositivo, inteiroPositivoEmCorpo } = require('../esquemas');
 const apresentar = require('../apresentadores');
@@ -105,12 +106,7 @@ function criarRotasDeConsultas({
   const cancelar = new CancelarConsulta({ consultas });
   const iniciarPagamento = new IniciarPagamento({ consultas, pagamentos, gateway, ...comRelogio });
 
-  // Consulta marcada é dado de saúde: não pode ficar em cache de proxy nem do
-  // navegador.
-  rotas.use((req, res, next) => {
-    res.set('Cache-Control', 'no-store');
-    next();
-  });
+  rotas.use(semCache);
 
   rotas.use(autenticar, carregarPaciente);
 

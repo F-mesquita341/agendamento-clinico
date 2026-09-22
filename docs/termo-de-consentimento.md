@@ -1,6 +1,6 @@
 # Termo de consentimento para tratamento de dados
 
-**Versão:** `2026-09-v1`
+**Versão:** `2026-09-v2`
 
 > **RASCUNHO — revisar com o orientador antes do uso com participantes.**
 > Este texto foi redigido como ponto de partida técnico e não substitui
@@ -20,8 +20,19 @@ e simular o pagamento de uma consulta.
 - seu nome e e-mail
 - telefone e data de nascimento, se você decidir informar
 - as consultas que você agendar, com data, horário, profissional e especialidade
+- um identificador do seu aparelho, se você permitir notificações — é o
+  endereço para onde o lembrete é enviado. Ele não revela quem você é nem onde
+  está. É apagado quando você sai do aplicativo; se você o desinstalar, é
+  apagado na próxima tentativa de envio, quando deixa de funcionar
 
 Não pedimos CPF, endereço ou documentos.
+
+## O que aparece no lembrete
+
+O lembrete diz apenas que você tem uma consulta, e quando: "Você tem uma
+consulta amanhã às 14:30". Ele **não** mostra o nome do profissional, a
+especialidade nem o motivo da consulta, porque notificações aparecem na tela
+bloqueada do celular, onde outras pessoas podem ler.
 
 ## Por que coletamos
 

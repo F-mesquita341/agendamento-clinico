@@ -16,10 +16,14 @@ const { verificarContaDeSandbox } = require('./infra/pagamento/travaDeSandbox');
 const { RepositorioDeConsultasPg } = require('./infra/db/RepositorioDeConsultasPg');
 const { RepositorioDePagamentosPg } = require('./infra/db/RepositorioDePagamentosPg');
 const { ExpirarReservasVencidas } = require('./application/ExpirarReservasVencidas');
+const { EnviarLembretes } = require('./application/EnviarLembretes');
+const { RepositorioDeDispositivosPg } = require('./infra/db/RepositorioDeDispositivosPg');
+const { criarServicoDeNotificacao } = require('./infra/notificacao');
 const { agendar } = require('./infra/agendador');
 const { encerrar, transporte } = require('./infra/db/pool');
 
 const INTERVALO_DA_EXPIRACAO_MS = 60_000;
+const INTERVALO_DOS_LEMBRETES_MS = 15 * 60_000;
 const PRAZO_DO_DESLIGAMENTO_MS = 10_000;
 
 const verificarToken = criarVerificadorFirebase();
@@ -62,6 +66,7 @@ const app = criarApp({ verificarToken, gateway });
 // e sair limpo, em vez de estourar.
 let servidor = null;
 let rotinaDeExpiracao = null;
+let rotinaDeLembretes = null;
 
 function subir() {
   servidor = app.listen(config.PORTA, () => {
@@ -99,6 +104,36 @@ function subir() {
         console.log(
           `Expiração de reservas: ${expiradas} expirada(s), ${confirmadas} confirmada(s) ` +
             `na reconciliação, ${adiadas} adiada(s), ${falhas} falha(s).`
+        );
+      }
+    },
+  });
+
+  // Lembrete das 24 horas. O intervalo é menor que a hora prevista no plano
+  // por causa da hibernação: no plano gratuito a API dorme depois de 15
+  // minutos parada, e a rotina dorme junto. Varrer com mais frequência aumenta
+  // a chance de a janela ser alcançada enquanto o serviço está acordado — e o
+  // `agendar` já roda uma vez na subida, que é quando ele acorda.
+  //
+  // Sem credencial do Firebase a rotina nem liga. Ligada, ela reservaria cada
+  // consulta, falharia no envio e a desmarcaria de novo, a cada 15 minutos —
+  // só ruído no log. Em produção, config.js já recusa a subida sem credencial.
+  if (!config.credencialFirebase) {
+    console.warn('Aviso: lembretes de consulta desligados — sem credencial do Firebase.');
+    return;
+  }
+  const lembrar = new EnviarLembretes({
+    consultas: new RepositorioDeConsultasPg(),
+    dispositivos: new RepositorioDeDispositivosPg(),
+    notificador: criarServicoDeNotificacao(),
+  });
+  rotinaDeLembretes = agendar(() => lembrar.executar(), INTERVALO_DOS_LEMBRETES_MS, {
+    nome: 'lembretes de consulta',
+    aoTerminar: ({ enviados, semAparelho, adiados, falhas }) => {
+      if (enviados || semAparelho || adiados || falhas) {
+        console.log(
+          `Lembretes: ${enviados} enviado(s), ${semAparelho} sem aparelho registrado, ` +
+            `${adiados} adiado(s), ${falhas} falha(s).`
         );
       }
     },
@@ -153,6 +188,7 @@ function desligar(sinal) {
   console.log(`\n${sinal} recebido, encerrando...`);
 
   rotinaDeExpiracao?.parar();
+  rotinaDeLembretes?.parar();
 
   // O sinal chegou enquanto a trava de sandbox era verificada: não há porta
   // aberta nem requisição em andamento, e o pool pode nem ter sido usado.

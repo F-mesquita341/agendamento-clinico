@@ -25,6 +25,7 @@ const profissionais = require('./rotas/profissionais');
 const { criarRotasDePacientes } = require('./rotas/pacientes');
 const { criarRotasDeConsultas } = require('./rotas/consultas');
 const { criarRotasDeWebhook } = require('./rotas/webhooks');
+const { criarRotasDeDispositivos } = require('./rotas/dispositivos');
 const { criarVerificadorFirebase } = require('../../infra/firebase/verificadorDeToken');
 const { criarGatewayDePagamento } = require('../../infra/pagamento');
 const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
@@ -44,6 +45,7 @@ function criarApp({
   horarios,
   consultas,
   pagamentos,
+  dispositivos,
   relogio,
 } = {}) {
   const app = express();
@@ -64,6 +66,7 @@ function criarApp({
     '/consultas',
     criarRotasDeConsultas({ verificarToken, gateway, pacientes, horarios, consultas, pagamentos, relogio })
   );
+  app.use('/dispositivos', criarRotasDeDispositivos({ verificarToken, pacientes, dispositivos }));
   app.use('/webhooks', criarRotasDeWebhook({ gateway, segredo: segredoDoWebhook, pagamentos }));
 
   app.use(rotaNaoEncontrada);

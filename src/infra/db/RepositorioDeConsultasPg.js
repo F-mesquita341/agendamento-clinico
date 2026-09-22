@@ -13,8 +13,9 @@
 
 const { RepositorioDeConsultas } = require('../../domain/repositorios');
 const { NaoEncontrado } = require('../../domain/erros');
-const { MOTIVO_CANCELAMENTO } = require('../../domain/Consulta');
-const { consultar, transacao } = require('./pool');
+const { MOTIVO_CANCELAMENTO, JANELA_DO_LEMBRETE_MS } = require('../../domain/Consulta');
+const { pool, consultar, transacao } = require('./pool');
+const { auditar } = require('./auditoria');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 const { RepositorioDeHorariosPg, paraHorario } = require('./RepositorioDeHorariosPg');
 const { paraProfissional } = require('./RepositorioDeProfissionaisPg');
@@ -209,6 +210,103 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
         acao: 'consulta.expirada',
       });
       return true;
+    });
+  }
+
+  /**
+   * Consultas confirmadas que começam nas próximas 24 h e ainda não foram
+   * avisadas. Sem bloqueio: é a lista de candidatas, e cada uma é reconferida
+   * sob bloqueio em `reservarLembrete`.
+   */
+  async aguardandoLembrete(agora, limite) {
+    // O limite da janela vem da MESMA constante que `precisaDeLembrete` usa.
+    // Escrito como `INTERVAL '24 hours'` aqui, as duas regras podiam divergir
+    // em silêncio: mudar a antecedência no domínio passaria nos testes de
+    // unidade, e a varredura continuaria trazendo só as consultas de 24 h.
+    const ate = new Date(agora.getTime() + JANELA_DO_LEMBRETE_MS);
+    const { rows } = await consultar(
+      `SELECT c.id
+         FROM consulta c
+         JOIN horario h ON h.id = c.horario_id
+        WHERE c.status = 'confirmada'
+          AND c.lembrete_enviado_em IS NULL
+          AND h.inicio > $1
+          AND h.inicio <= $3
+        ORDER BY h.inicio
+        LIMIT $2`,
+      [agora, limite, ate]
+    );
+    return rows.map((linha) => Number(linha.id));
+  }
+
+  /**
+   * Reserva o lembrete: marca `lembrete_enviado_em` sob bloqueio e devolve o
+   * que é preciso para montar e enviar a mensagem.
+   *
+   * MARCA ANTES DE ENVIAR, e isso é escolha, não descuido. O portão da etapa
+   * exige que o lembrete chegue uma única vez. Marcando depois, uma queda entre
+   * o envio e a gravação faria a rodada seguinte enviar de novo — duplicata.
+   * Marcando antes, a mesma queda faz o lembrete se perder, o que é o erro
+   * menos grave dos dois. Para a falha que dá para distinguir — o provedor
+   * recusar —, existe `desmarcarLembrete`.
+   *
+   * @returns {Promise<{consultaId: number, pacienteId: number, inicio: Date}|null>}
+   *          null quando a consulta deixou de merecer o lembrete entre a
+   *          varredura e este bloqueio: cancelada, ou já avisada por outra
+   *          rodada.
+   */
+  async reservarLembrete(consultaId, agora) {
+    return transacao(async (cliente) => {
+      // Duas leituras em vez de um JOIN: `COLUNAS_DA_CONSULTA` não tem prefixo
+      // de tabela, e num JOIN o `id` fica ambíguo. Reaproveitar `lerSobBloqueio`
+      // mantém o bloqueio idêntico ao dos outros caminhos que tocam a consulta.
+      const consulta = await lerSobBloqueio(cliente, consultaId);
+      if (!consulta) return null;
+
+      const { rows } = await cliente.query('SELECT inicio FROM horario WHERE id = $1', [
+        consulta.horarioId,
+      ]);
+      const inicio = rows[0]?.inicio;
+      if (!consulta.precisaDeLembrete(inicio, agora)) return null;
+
+      await cliente.query(
+        'UPDATE consulta SET lembrete_enviado_em = $2, atualizado_em = now() WHERE id = $1',
+        [consultaId, agora]
+      );
+      return { consultaId, pacienteId: consulta.pacienteId, inicio };
+    });
+  }
+
+  /**
+   * Desfaz a reserva quando o envio falhou por motivo momentâneo, para a rodada
+   * seguinte tentar de novo. Sem isso, uma indisponibilidade do provedor de
+   * notificação consumiria o lembrete sem entregá-lo.
+   */
+  async desmarcarLembrete(consultaId) {
+    await consultar(
+      'UPDATE consulta SET lembrete_enviado_em = NULL, atualizado_em = now() WHERE id = $1',
+      [consultaId]
+    );
+  }
+
+  /**
+   * Registra na auditoria que o lembrete saiu — depois de ele ter saído.
+   *
+   * Separado da marca de propósito: a marca é gravada ANTES do envio, para não
+   * arriscar duplicata, e uma linha de auditoria dizendo "enviado" antes de
+   * enviar seria mentira num registro que existe justamente para ser
+   * confiável.
+   *
+   * O detalhe guarda QUANTOS aparelhos foram avisados, nunca os tokens — eles
+   * identificam o telefone da pessoa.
+   */
+  async registrarLembreteEnviado(consultaId, aparelhos) {
+    await auditar(pool, {
+      atorTipo: 'sistema',
+      acao: 'lembrete.enviado',
+      entidade: 'consulta',
+      entidadeId: consultaId,
+      detalhe: { aparelhos },
     });
   }
 }

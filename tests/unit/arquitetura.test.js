@@ -109,14 +109,17 @@ describe('regra de dependência', () => {
 describe('dublês de teste', () => {
   const contratos = require('../../src/domain/repositorios');
   const { GatewayDePagamento } = require('../../src/domain/pagamentos');
+  const { ServicoDeNotificacao } = require('../../src/domain/notificacoes');
   const dubles = require('../helpers/repositoriosFalsos');
   const { GatewayFalso } = require('../helpers/gatewayFalso');
+  const { NotificadorFalso } = require('../helpers/notificadorFalso');
 
   const pares = [
     [contratos.RepositorioDeHorarios, dubles.HorariosFalsos],
     [contratos.RepositorioDeConsultas, dubles.ConsultasFalsas],
     [contratos.RepositorioDePacientes, dubles.PacientesFalsos],
     [GatewayDePagamento, GatewayFalso],
+    [ServicoDeNotificacao, NotificadorFalso],
   ];
 
   test.each(pares.map(([contrato, duble]) => [duble.name, contrato.name, contrato, duble]))(

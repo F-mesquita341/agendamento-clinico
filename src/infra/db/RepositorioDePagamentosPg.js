@@ -17,6 +17,7 @@
 const { RepositorioDePagamentos } = require('../../domain/pagamentos');
 const { decidirEfeitoDoPagamento } = require('../../domain/Pagamento');
 const { consultar, transacao } = require('./pool');
+const { auditar } = require('./auditoria');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 
 const COLUNAS = `
@@ -35,14 +36,6 @@ function paraCheckout(linha) {
     preferenciaId: linha.preferencia_id,
     checkoutUrl: linha.checkout_url,
   };
-}
-
-async function auditar(cliente, { atorTipo, atorId = null, acao, entidade, entidadeId, detalhe }) {
-  await cliente.query(
-    `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [atorTipo, atorId, acao, entidade, entidadeId, detalhe]
-  );
 }
 
 async function consultaSobBloqueio(cliente, consultaId) {

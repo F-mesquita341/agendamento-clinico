@@ -23,6 +23,7 @@ const { AtualizarPerfil } = require('../../../application/AtualizarPerfil');
 const { RepositorioDePacientesPg } = require('../../../infra/db/RepositorioDePacientesPg');
 const { criarAutenticar } = require('../middlewares/autenticar');
 const { criarCarregarPaciente } = require('../middlewares/carregarPaciente');
+const { semCache } = require('../middlewares/semCache');
 const { validar } = require('../validacao');
 const {
   objetoEstrito,
@@ -77,12 +78,7 @@ function criarRotasDePacientes({
   const cadastrar = new CadastrarPaciente({ pacientes, ...(relogio ? { relogio } : {}) });
   const atualizar = new AtualizarPerfil({ pacientes });
 
-  // Respostas com dado pessoal não podem ficar em cache de proxy nem do
-  // navegador.
-  rotas.use((req, res, next) => {
-    res.set('Cache-Control', 'no-store');
-    next();
-  });
+  rotas.use(semCache);
 
   rotas.post('/', autenticar, async (req, res, next) => {
     try {

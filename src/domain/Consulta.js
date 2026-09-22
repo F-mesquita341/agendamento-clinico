@@ -40,6 +40,13 @@ const MOTIVO_CANCELAMENTO = Object.freeze({
   RESERVA_EXPIRADA: 'reserva_expirada',
 });
 
+/**
+ * Antecedência do lembrete. A Seção 3.2 do projeto aponta lembrete automatizado
+ * entre as intervenções de maior efetividade contra o absenteísmo; 24 horas é a
+ * antecedência que dá tempo de a pessoa remarcar ou avisar, liberando a vaga.
+ */
+const JANELA_DO_LEMBRETE_MS = 24 * 60 * 60 * 1000;
+
 class Consulta {
   constructor({
     id,
@@ -89,8 +96,26 @@ class Consulta {
     );
   }
 
-  precisaDeLembrete() {
-    return this.status === STATUS.CONFIRMADA && this.lembreteEnviadoEm === null;
+  /**
+   * A consulta merece lembrete agora?
+   *
+   * Três condições, e as três precisam estar aqui — não metade aqui e metade
+   * na consulta SQL da varredura. A rotina relê a consulta sob bloqueio antes
+   * de marcar, e é esta função que ela pergunta de novo: entre a varredura e o
+   * bloqueio, a consulta pode ter sido cancelada, ou já avisada por uma rodada
+   * anterior.
+   *
+   * @param {Date} inicio começo da consulta — mora no horário, não aqui
+   * @param {Date} agora
+   */
+  precisaDeLembrete(inicio, agora) {
+    if (this.status !== STATUS.CONFIRMADA || this.lembreteEnviadoEm !== null) return false;
+    if (!inicio || !agora) return false;
+
+    const faltam = new Date(inicio).getTime() - agora.getTime();
+    // Passada não se lembra, e o aviso é o das 24 horas: mais cedo que isso
+    // seria avisar de coisa que a pessoa acabou de marcar.
+    return faltam > 0 && faltam <= JANELA_DO_LEMBRETE_MS;
   }
 
   /**
@@ -152,4 +177,9 @@ class Consulta {
   }
 }
 
-module.exports = { Consulta, STATUS_CONSULTA: STATUS, MOTIVO_CANCELAMENTO };
+module.exports = {
+  Consulta,
+  STATUS_CONSULTA: STATUS,
+  MOTIVO_CANCELAMENTO,
+  JANELA_DO_LEMBRETE_MS,
+};

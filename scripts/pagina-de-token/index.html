@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prova de notificação — Etapa 9</title>
+  <!--
+    Página de TESTE, não produto. Existe porque o aplicativo Flutter é a Fase 4
+    e ainda não existe: sem cliente, ninguém gera token de aparelho, e sem token
+    não há para onde enviar. Ela faz o que o aplicativo fará — entrar no
+    Firebase, obter o token do FCM e registrá-lo na API — e recebe a
+    notificação no navegador. Isso prova o caminho API → FCM → dispositivo por
+    inteiro; o "aparelho Android real" fica para quando o aplicativo existir.
+
+    Servida por scripts/servir-pagina-de-token.js. Não abra este arquivo direto
+    do disco: service worker exige contexto seguro, e file:// não é.
+  -->
+  <style>
+    :root { color-scheme: light dark; --borda: #8884; --ok: #1a7f37; --erro: #c62828; }
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.3rem; margin-bottom: .25rem; }
+    .aviso { font-size: .9rem; opacity: .8; }
+    label { display: block; margin-top: .9rem; font-weight: 600; }
+    input { width: 100%; box-sizing: border-box; padding: .5rem; font: inherit; border: 1px solid var(--borda); border-radius: 6px; }
+    button { margin-top: 1rem; margin-right: .5rem; padding: .55rem 1rem; font: inherit; border-radius: 6px; border: 1px solid var(--borda); cursor: pointer; }
+    #registro li { margin: .2rem 0; }
+    .ok { color: var(--ok); } .erro { color: var(--erro); }
+    #recebidas { margin-top: 1rem; padding: .75rem; border: 1px dashed var(--borda); border-radius: 6px; min-height: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>Prova de notificação — Etapa 9</h1>
+  <p class="aviso">
+    Ferramenta de teste do TCC. Use Chrome ou Edge numa janela <strong>normal</strong>:
+    janela anônima e o Brave bloqueiam as notificações do Firebase.
+  </p>
+
+  <label for="api">Endereço da API</label>
+  <input id="api" type="url">
+
+  <label for="email">E-mail do paciente de teste</label>
+  <input id="email" type="email" value="paciente.a@example.com" autocomplete="username">
+
+  <label for="senha">Senha</label>
+  <input id="senha" type="password" autocomplete="current-password">
+
+  <button id="ativar">Ativar notificações</button>
+  <button id="revogar" disabled>Revogar este aparelho</button>
+
+  <ul id="registro"></ul>
+
+  <h2 style="font-size:1rem;margin-top:1.5rem">Notificações recebidas com a página aberta</h2>
+  <div id="recebidas"><span class="aviso">Nenhuma ainda. Com a página em segundo plano, a
+    notificação aparece no sistema, não aqui.</span></div>
+
+  <script src="https://www.gstatic.com/firebasejs/12.0.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.0.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.0.0/firebase-messaging-compat.js"></script>
+  <script src="/config.js"></script>
+  <script>
+    'use strict';
+
+    const $ = (id) => document.getElementById(id);
+    $('api').value = window.API_PADRAO;
+
+    function registrar(texto, classe = '') {
+      const item = document.createElement('li');
+      item.textContent = texto;
+      if (classe) item.className = classe;
+      $('registro').appendChild(item);
+    }
+
+    // O token é dado pessoal — identifica o aparelho. Nem na tela ele aparece
+    // inteiro: o início basta para conferir que houve um.
+    const resumo = (token) => `${token.slice(0, 12)}…`;
+
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    // O id, e não o token, é o que se guarda para revogar: o token do aparelho
+    // não vai em URL — ver src/interfaces/http/rotas/dispositivos.js.
+    let idDoAparelho = null;
+    let idToken = null;
+
+    async function api(metodo, caminho, corpo) {
+      const resposta = await fetch(`${$('api').value.replace(/\/+$/, '')}${caminho}`, {
+        method: metodo,
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+          ...(corpo ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: corpo ? JSON.stringify(corpo) : undefined,
+      });
+      const texto = await resposta.text();
+      return { status: resposta.status, corpo: texto ? JSON.parse(texto) : null };
+    }
+
+    $('ativar').addEventListener('click', async () => {
+      $('registro').innerHTML = '';
+      try {
+        const credencial = await firebase
+          .auth()
+          .signInWithEmailAndPassword($('email').value, $('senha').value);
+        idToken = await credencial.user.getIdToken();
+        registrar(`Entrou como ${credencial.user.email}`, 'ok');
+
+        const permissao = await Notification.requestPermission();
+        if (permissao !== 'granted') {
+          registrar(`O navegador não permitiu notificações (${permissao}).`, 'erro');
+          return;
+        }
+        registrar('Permissão de notificação concedida', 'ok');
+
+        const trabalhador = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        const tokenDoAparelho = await firebase.messaging().getToken({
+          vapidKey: window.VAPID_KEY,
+          serviceWorkerRegistration: trabalhador,
+        });
+        registrar(`Token do FCM obtido: ${resumo(tokenDoAparelho)}`, 'ok');
+
+        const { status, corpo } = await api('POST', '/dispositivos', {
+          token: tokenDoAparelho,
+          plataforma: 'web',
+        });
+        if (status === 201) {
+          idDoAparelho = corpo.dispositivo.id;
+          registrar(`Aparelho registrado na API → 201 (id ${idDoAparelho})`, 'ok');
+          $('revogar').disabled = false;
+          manterAcordada();
+        } else {
+          registrar(`A API respondeu HTTP ${status}`, 'erro');
+        }
+      } catch (erro) {
+        // Mensagens do Firebase trazem só um código; não contêm senha nem chave.
+        registrar(`Falhou: ${erro.code ?? erro.message}`, 'erro');
+      }
+    });
+
+    $('revogar').addEventListener('click', async () => {
+      const { status } = await api('DELETE', `/dispositivos/${idDoAparelho}`);
+      registrar(
+        status === 204 ? 'Aparelho revogado → 204' : `A API respondeu HTTP ${status}`,
+        status === 204 ? 'ok' : 'erro'
+      );
+      if (status === 204) $('revogar').disabled = true;
+    });
+
+    // Com a página em PRIMEIRO plano, o FCM não mostra notificação do sistema:
+    // entrega aqui. Com a página em segundo plano, quem mostra é o service
+    // worker, e a mensagem não passa por este código.
+    firebase.messaging().onMessage(({ notification }) => {
+      if ($('recebidas').querySelector('.aviso')) $('recebidas').innerHTML = '';
+      const item = document.createElement('p');
+      item.innerHTML = `<strong></strong><br><span></span><br><small></small>`;
+      item.querySelector('strong').textContent = notification?.title ?? '(sem título)';
+      item.querySelector('span').textContent = notification?.body ?? '';
+      item.querySelector('small').textContent = `recebida às ${new Date().toLocaleTimeString('pt-BR')}`;
+      $('recebidas').appendChild(item);
+    });
+
+    /*
+     * No plano gratuito do Render a API hiberna depois de 15 minutos sem
+     * requisição, e a rotina de lembretes dorme junto. Enquanto esta página
+     * espera o lembrete, ela consulta a rota de saúde a cada 4 minutos para o
+     * serviço não adormecer no meio do teste.
+     *
+     * É ferramenta de teste, e isso não esconde a limitação: ela continua
+     * valendo para o uso real, e está registrada no README e no diário.
+     */
+    let pulso = null;
+    function manterAcordada() {
+      if (pulso) return;
+      registrar('Mantendo a API acordada enquanto espera o lembrete (a cada 4 min)');
+      pulso = setInterval(() => {
+        fetch(`${$('api').value.replace(/\/+$/, '')}/saude`).catch(() => {});
+      }, 4 * 60_000);
+    }
+  </script>
+</body>
+</html>

@@ -28,8 +28,8 @@
  * rede e sem credencial, inclusive na integração contínua.
  */
 
-const config = require('../../config');
 const { NaoAutenticado, SessaoExpirada } = require('../../domain/erros');
+const { obterAppDoFirebase } = require('./app');
 
 /** Códigos do Firebase que significam "o token enviado não serve". */
 const TOKEN_INVALIDO = new Set([
@@ -38,22 +38,6 @@ const TOKEN_INVALIDO = new Set([
   'auth/id-token-revoked',
   'auth/user-disabled',
 ]);
-
-function credencialDoFirebase() {
-  const { applicationDefault, cert } = require('firebase-admin/app');
-
-  if (config.credencialFirebase === 'campos') {
-    return cert({
-      projectId: config.FIREBASE_PROJECT_ID,
-      clientEmail: config.FIREBASE_CLIENT_EMAIL,
-      // Painéis de variáveis costumam guardar a chave com "\n" literal em vez
-      // de quebra de linha real; sem a conversão, a chave não é reconhecida.
-      privateKey: config.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    });
-  }
-  // Lê o arquivo apontado por GOOGLE_APPLICATION_CREDENTIALS.
-  return applicationDefault();
-}
 
 /**
  * @param {object} [opcoes]
@@ -65,10 +49,8 @@ function criarVerificadorFirebase({ auth } = {}) {
 
   function obterAutenticador() {
     if (!autenticador) {
-      const { initializeApp, getApps } = require('firebase-admin/app');
       const { getAuth } = require('firebase-admin/auth');
-      const app = getApps()[0] ?? initializeApp({ credential: credencialDoFirebase() });
-      autenticador = getAuth(app);
+      autenticador = getAuth(obterAppDoFirebase());
     }
     return autenticador;
   }
