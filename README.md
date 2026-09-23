@@ -323,6 +323,11 @@ Tokens que o provedor diz não existirem mais — aplicativo desinstalado — s�
 apagados. Falha momentânea não apaga nada: um token bom apagado por engano
 deixaria a pessoa sem lembrete para sempre, em silêncio.
 
+**Quem ainda não tem aparelho não perde o lembrete.** A rotina só considera
+consultas de pacientes com aparelho registrado. Quem agenda e só ativa as
+notificações depois — mesmo já dentro das 24 horas — é lembrado na rodada
+seguinte ao registro.
+
 **Limitação do plano gratuito:** a rotina só roda com a API acordada, e no
 Render ela hiberna depois de 15 minutos. Um lembrete pode sair atrasado, ou não
 sair. As sessões com participantes devem começar acordando o serviço.
@@ -343,6 +348,15 @@ npm run pagina:token
 
 Abra `http://localhost:4000` no Chrome ou no Edge, em janela **normal** — janela
 anônima e o Brave bloqueiam as notificações do Firebase.
+
+**Registre o navegador ANTES de agendar.** A página não faz nada sozinha: é
+preciso entrar e clicar em "Ativar notificações". Depois, com a página aberta
+(ela mantém a API acordada), agende e pague pelo `verificar:portao`; o lembrete
+chega em até 15 minutos.
+
+O portão da Etapa 9 foi atingido assim em 22/09/2026, contra a API publicada:
+o lembrete chegou uma vez, e nenhuma rodada seguinte o repetiu. O aparelho
+Android real fica para quando o aplicativo existir.
 
 ## Publicação
 

@@ -1310,3 +1310,40 @@ divergência futura — algo que um teste só enxergaria mudando a constante.
 Ambiente: a rede de onde trabalhei hoje bloqueia a porta 5432, e o Neon ficou
 inalcançável por TCP. A suíte rodou por WebSocket (`TRANSPORTE_BANCO=websocket`),
 que o projeto já previa desde a Etapa 1 exatamente para isso.
+
+## 22/09/2026 — Portão da Etapa 9, e o que a primeira tentativa ensinou
+
+O lembrete chegou, contra a API publicada e o Firebase de verdade: "Você tem uma
+consulta amanhã às 08:30", numa página aberta no Chrome — sem especialidade, sem
+profissional. No banco de produção, uma linha `lembrete.enviado` para a
+consulta 6, com `{"aparelhos":1}`; vinte e cinco minutos depois, com o serviço
+mantido acordado, continuava uma só. Portão atingido. O aparelho Android real
+fica para a Fase 4.
+
+Uma ressalva sobre o que prova o quê: uma rodada que não tem nada a fazer não
+deixa rastro, então a produção mostra "passaram mais de 15 minutos acordado e
+não houve reenvio". Quem prova o mecanismo é o teste "a segunda rodada NÃO
+reenvia". O teste diz que funciona; a produção diz que funciona lá.
+
+**A primeira tentativa falhou, e do jeito que o desenho previa.** A página foi
+aberta, mas o navegador não chegou a ser registrado. A consulta 5 foi agendada
+e paga, a rotina passou às 23:00, não achou aparelho e marcou a consulta como
+tratada — a regra "sem aparelho, marca e desiste", pensada para não varrer a
+mesma consulta para sempre. Registrado o aparelho, a consulta 5 já estava
+consumida.
+
+Nenhuma linha `lembrete.enviado` foi gravada para ela, o que confirma que a
+auditoria registra só envio que aconteceu. Mas a regra estava errada para quem
+importa: um paciente que agenda e só ativa as notificações dentro das 24 horas
+nunca seria lembrado. O "para sempre" que a justificava era, na verdade,
+limitado pelo começo da consulta.
+
+Corrigido na Etapa 10, antes do endurecimento: a varredura só traz consultas de
+pacientes que têm aparelho (`EXISTS`), e quem não tem nem é reservado. Se o
+aparelho some entre a varredura e o envio — corrida rara —, a marca é desfeita
+pela mesma regra. O incidente da consulta 5 virou teste: aparelho registrado
+depois da primeira rodada recebe na rodada seguinte. Dois defeitos
+reintroduzidos, um de cada mecanismo, cada um derrubando o seu teste — e um
+terceiro que não valeu: o `sed` apagou a ocorrência errada de
+`desmarcarLembrete`, e os testes passaram porque o defeito não estava onde eu
+achava. Refeito no lugar certo, caiu.

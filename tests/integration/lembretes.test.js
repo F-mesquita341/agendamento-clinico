@@ -139,15 +139,43 @@ describe('quem recebe lembrete', () => {
     expect(notificador.quantidade).toBe(0);
   });
 
-  test('paciente sem aparelho registrado não trava a rotina', async () => {
-    // A marca fica mesmo assim: não há o que reenviar, e tentar a cada rodada
-    // faria a rotina varrer a mesma consulta para sempre.
+  test('paciente sem aparelho nem é reservado — o lembrete não é consumido', async () => {
     const { consultaId } = await cenario({ aparelhos: [] });
+    const reservar = jest.spyOn(consultas, 'reservarLembrete');
+
+    const resultado = await rotina.executar();
+
+    expect(reservar).not.toHaveBeenCalled();
+    expect(resultado).toMatchObject({ enviados: 0, semAparelho: 0 });
+    expect(await marcaDoLembrete(consultaId)).toBeNull();
+  });
+
+  test('aparelho registrado DEPOIS da primeira rodada ainda recebe o lembrete', async () => {
+    // O incidente do portão da Etapa 9, virado teste: a consulta 5 foi
+    // confirmada, a rotina passou antes de o aparelho ser registrado, marcou
+    // e desistiu — e aquele lembrete nunca saiu.
+    const { consultaId, pacienteId } = await cenario({ aparelhos: [] });
+
+    await rotina.executar();
+    await dispositivos.registrar({ pacienteId, token: 'ativado-depois', plataforma: 'android' });
+    const segunda = await rotina.executar();
+
+    expect(segunda.enviados).toBe(1);
+    expect(notificador.enviados[0].tokens).toEqual(['ativado-depois']);
+    expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);
+  });
+
+  test('aparelho que some entre a varredura e o envio desfaz a marca', async () => {
+    // Corrida: o aparelho existia na varredura e foi revogado antes do envio.
+    // Mesma regra — sem aparelho, o lembrete não é consumido.
+    const { consultaId } = await cenario();
+    jest.spyOn(dispositivos, 'doPaciente').mockResolvedValueOnce([]);
 
     const resultado = await rotina.executar();
 
     expect(resultado).toMatchObject({ enviados: 0, semAparelho: 1 });
-    expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);
+    expect(notificador.quantidade).toBe(0);
+    expect(await marcaDoLembrete(consultaId)).toBeNull();
   });
 });
 

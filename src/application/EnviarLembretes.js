@@ -87,9 +87,12 @@ class EnviarLembretes {
   async avisar({ consultaId, pacienteId, inicio }, agora) {
     const tokens = await this.dispositivos.doPaciente(pacienteId);
     if (tokens.length === 0) {
-      // Paciente sem aplicativo instalado. A marca fica: não há o que reenviar,
-      // e tentar de novo a cada rodada seria varrer a mesma consulta para
-      // sempre.
+      // A varredura só traz quem tem aparelho, então isto é uma corrida: o
+      // aparelho foi revogado entre a varredura e o envio. Mesma regra da
+      // varredura — sem aparelho, o lembrete não é consumido. A marca é
+      // desfeita, e se a pessoa ativar as notificações de novo dentro da
+      // janela, ainda é lembrada.
+      await this.consultas.desmarcarLembrete(consultaId);
       return false;
     }
 
