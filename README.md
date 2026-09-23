@@ -156,7 +156,29 @@ interpretar o texto da mensagem.
 | 404 | Não existe — ou pertence a outro paciente, sem distinção |
 | 409 | Conflito de concorrência ou de estado |
 | 422 | Regra de negócio violada |
+| 429 | Escritas demais em pouco tempo — ver abaixo |
 | 500 | Erro interno |
+
+### Limite de escritas
+
+Cada paciente tem até `LIMITE_ESCRITAS_POR_MINUTO` escritas por minuto (30 por
+padrão). Passando disso, a API responde **429** `MUITAS_REQUISICOES`, com a
+ação `tentar_novamente` e o cabeçalho `Retry-After`, em segundos.
+
+- **A chave é o paciente, não o IP.** Celulares atrás do NAT da operadora
+  dividem o mesmo endereço, e um limite por IP puniria um desconhecido pelo
+  outro.
+- **O orçamento é um só**, somado entre todas as rotas de escrita: cadastro,
+  atualização do perfil, agendamento, cancelamento, pagamento e registro e
+  revogação de aparelho.
+- **Pedido recusado também conta.** Se só os bem-sucedidos contassem, bastaria
+  mandar pedidos inválidos para escrever à vontade.
+- **Fora do limite:** as leituras, `/saude` e o webhook do Mercado Pago — que
+  reenvia o que recebe 429, e que a assinatura já protege.
+
+A contagem fica na memória do processo. Com uma instância só, como hoje no
+Render, basta; com várias, cada uma contaria à parte, e o limite precisaria de
+um armazenamento compartilhado.
 
 ## Controle de concorrência
 
@@ -438,6 +460,10 @@ exatamente o código medido.
 **Conflito** é agendamento duplicado — mais de uma consulta ativa no mesmo
 horário. **Recusa** é o `409` de quem perdeu a disputa: 99 por rodada é o
 resultado correto. O HTTP chama o 409 de *Conflict*, mas recusa não é conflito.
+
+O teste roda com o [limite de escritas](#limite-de-escritas) num valor que não
+dispara. O limitador barra o pedido antes do caso de uso, então só pode tirar
+pedidos da disputa, nunca criar uma: medir sem ele é o pior caso para o lock.
 
 ## Autenticação
 

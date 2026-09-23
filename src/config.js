@@ -27,6 +27,11 @@ const esquema = z.object({
 
   RESERVA_MINUTOS: z.coerce.number().int().positive().default(15),
 
+  // Escritas por paciente por minuto (Etapa 10). Um paciente de verdade faz
+  // poucas por sessão — cadastrar, agendar, pagar, talvez cancelar —, então 30
+  // sobra para o uso legítimo e ainda barra quem dispara centenas.
+  LIMITE_ESCRITAS_POR_MINUTO: z.coerce.number().int().positive().default(30),
+
   // 'tcp' fala com o PostgreSQL na 5432, como de costume. 'websocket' usa o
   // driver do Neon na 443, para redes que bloqueiam a porta do banco.
   // Ver src/infra/db/driver.js.

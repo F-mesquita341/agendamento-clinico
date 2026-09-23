@@ -26,6 +26,7 @@ const { criarRotasDePacientes } = require('./rotas/pacientes');
 const { criarRotasDeConsultas } = require('./rotas/consultas');
 const { criarRotasDeWebhook } = require('./rotas/webhooks');
 const { criarRotasDeDispositivos } = require('./rotas/dispositivos');
+const { criarLimiteDeEscritas } = require('./middlewares/limitarEscritas');
 const { criarVerificadorFirebase } = require('../../infra/firebase/verificadorDeToken');
 const { criarGatewayDePagamento } = require('../../infra/pagamento');
 const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
@@ -36,11 +37,15 @@ const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
  * @param {object} [deps.gateway] provedor de pagamento; nos testes, um dublê sem
  *        rede. Sem credencial configurada, o padrão responde "indisponível".
  * @param {string} [deps.segredoDoWebhook] chave que assina os avisos do provedor
+ * @param {number} [deps.limiteDeEscritas] escritas por paciente por minuto; os
+ *        testes passam um valor alto, para não tropeçar num limite que não é o
+ *        assunto deles
  */
 function criarApp({
   verificarToken = criarVerificadorFirebase(),
   gateway = criarGatewayDePagamento(),
   segredoDoWebhook = config.MERCADO_PAGO_SEGREDO_WEBHOOK,
+  limiteDeEscritas = config.LIMITE_ESCRITAS_POR_MINUTO,
   pacientes,
   horarios,
   consultas,
@@ -50,6 +55,10 @@ function criarApp({
 } = {}) {
   const app = express();
 
+  // Uma instância só, repassada a todos os roteadores: o orçamento é do
+  // paciente, somado entre as rotas de escrita.
+  const limitarEscritas = criarLimiteDeEscritas({ limitePorMinuto: limiteDeEscritas });
+
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(cors({ origin: config.origens }));
@@ -58,15 +67,24 @@ function criarApp({
   app.use(saude);
   app.use('/especialidades', especialidades);
   app.use('/profissionais', profissionais);
-  app.use('/pacientes', criarRotasDePacientes({ verificarToken, pacientes, relogio }));
+  app.use('/pacientes', criarRotasDePacientes({ verificarToken, pacientes, relogio, limitarEscritas }));
   // `horarios` e `consultas` só são informados pelo teste de carga, que mede
   // quantas recusas foram decididas pelo lock; ausentes, a rota usa os
   // adaptadores PostgreSQL de sempre.
   app.use(
     '/consultas',
-    criarRotasDeConsultas({ verificarToken, gateway, pacientes, horarios, consultas, pagamentos, relogio })
+    criarRotasDeConsultas({
+      verificarToken,
+      gateway,
+      pacientes,
+      horarios,
+      consultas,
+      pagamentos,
+      relogio,
+      limitarEscritas,
+    })
   );
-  app.use('/dispositivos', criarRotasDeDispositivos({ verificarToken, pacientes, dispositivos }));
+  app.use('/dispositivos', criarRotasDeDispositivos({ verificarToken, pacientes, dispositivos, limitarEscritas }));
   app.use('/webhooks', criarRotasDeWebhook({ gateway, segredo: segredoDoWebhook, pagamentos }));
 
   app.use(rotaNaoEncontrada);

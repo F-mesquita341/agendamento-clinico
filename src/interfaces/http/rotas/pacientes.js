@@ -71,6 +71,8 @@ function criarRotasDePacientes({
   verificarToken,
   pacientes = new RepositorioDePacientesPg(),
   relogio,
+  // Sem valor padrão: ver o comentário em rotas/consultas.js.
+  limitarEscritas,
 }) {
   const rotas = Router();
   const autenticar = criarAutenticar(verificarToken);
@@ -80,7 +82,7 @@ function criarRotasDePacientes({
 
   rotas.use(semCache);
 
-  rotas.post('/', autenticar, async (req, res, next) => {
+  rotas.post('/', autenticar, limitarEscritas, async (req, res, next) => {
     try {
       const corpo = validar(corpoDoCadastro, req.body);
       const paciente = await cadastrar.executar({ identidade: req.usuario, ...corpo });
@@ -94,7 +96,7 @@ function criarRotasDePacientes({
     res.json({ paciente: apresentar.paciente(req.paciente) });
   });
 
-  rotas.patch('/me', autenticar, carregarPaciente, async (req, res, next) => {
+  rotas.patch('/me', autenticar, limitarEscritas, carregarPaciente, async (req, res, next) => {
     try {
       const alteracoes = validar(corpoDaAtualizacao, req.body);
       const paciente = await atualizar.executar({ pacienteId: req.paciente.id, alteracoes });

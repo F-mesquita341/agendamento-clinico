@@ -91,6 +91,9 @@ function criarRotasDeConsultas({
   consultas = new RepositorioDeConsultasPg(),
   pagamentos = new RepositorioDePagamentosPg(),
   relogio,
+  // Sem valor padrão de propósito: faltando, o Express recusa a rota na subida,
+  // em vez de o limite ficar desligado em silêncio.
+  limitarEscritas,
 }) {
   const rotas = Router();
   const autenticar = criarAutenticar(verificarToken);
@@ -110,7 +113,7 @@ function criarRotasDeConsultas({
 
   rotas.use(autenticar, carregarPaciente);
 
-  rotas.post('/', async (req, res, next) => {
+  rotas.post('/', limitarEscritas, async (req, res, next) => {
     try {
       const corpo = validar(corpoDoAgendamento, req.body);
       const consulta = await agendar.executar({
@@ -170,7 +173,7 @@ function criarRotasDeConsultas({
     }
   });
 
-  rotas.patch('/:id/cancelamento', async (req, res, next) => {
+  rotas.patch('/:id/cancelamento', limitarEscritas, async (req, res, next) => {
     try {
       const { id } = validar(idNaRota, req.params);
 
@@ -185,7 +188,7 @@ function criarRotasDeConsultas({
     }
   });
 
-  rotas.post('/:id/pagamento', async (req, res, next) => {
+  rotas.post('/:id/pagamento', limitarEscritas, async (req, res, next) => {
     try {
       const { id } = validar(idNaRota, req.params);
 
