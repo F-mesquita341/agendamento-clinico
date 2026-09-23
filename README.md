@@ -130,6 +130,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run pagina:token` | Página de prova da Etapa 9: registra o navegador como aparelho e recebe o lembrete (ver abaixo) |
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
 | `npm run exportar:pesquisa` | Conjunto de dados da pesquisa, pseudonimizado, numa pasta fora do repositório (ver abaixo) |
+| `npm run auditar:historico` | Procura credenciais em todo o histórico do Git, sem nunca mostrar o valor (ver abaixo) |
 
 ## Convenções da API
 
@@ -590,6 +591,30 @@ banco existir, uma linha exportada pode ser casada com a linha dele mesmo sem o
 segredo. Até o fim da pesquisa, o conjunto continua sendo dado pessoal e deve
 ser tratado como tal. O descarte da Seção 4.7 — do segredo **e** do banco — é o
 que desfaz a associação de vez.
+
+## Credenciais fora do histórico
+
+O repositório é público, e credencial que entra num commit continua no
+histórico mesmo depois de apagada. Para conferir:
+
+```bash
+npm run auditar:historico
+```
+
+O script lê cada linha acrescentada em cada commit, de todas as referências, e
+o nome de cada arquivo que já existiu. Procura `.env` versionado, arquivo de
+chave, JSON de conta de serviço, bloco de chave privada, token do Mercado Pago,
+URL do PostgreSQL com senha, senha do Neon, token do GitHub e valor atribuído a
+variável secreta. Relata commit, arquivo, linha e tipo — **nunca o valor** — e
+sai com erro se achar algo. Roda na integração contínua a cada envio.
+
+Não acusa a configuração do app Web do Firebase (`apiKey`, `appId`, VAPID), que
+é pública por natureza, nem o banco descartável da integração contínua ou os
+valores falsos que os testes usam de propósito.
+
+Se acusar algo, o que resolve é **trocar a credencial**. Reescrever o histórico
+não desfaz uma exposição que já foi publicada: o valor pode ter sido copiado
+antes.
 
 ## Licença
 
