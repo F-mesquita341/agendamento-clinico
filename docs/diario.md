@@ -1347,3 +1347,69 @@ reintroduzidos, um de cada mecanismo, cada um derrubando o seu teste — e um
 terceiro que não valeu: o `sed` apagou a ocorrência errada de
 `desmarcarLembrete`, e os testes passaram porque o defeito não estava onde eu
 achava. Refeito no lugar certo, caiu.
+
+## 23/09/2026 — Etapa 10: endurecimento
+
+Os quatro itens que o relatório de revisão de 22/09 deixou para fechar a API,
+cada um num commit, cada teste confirmado pelo defeito que ele cobre.
+
+**Limite de escritas (E10.1).** Trinta escritas por minuto, por paciente — não
+por IP: celulares atrás do NAT da operadora dividem endereço, e o teste de carga
+dispara cem pacientes do mesmo IP. Uma instância só do limitador, repassada aos
+roteadores, para o orçamento ser do paciente e não de cada grupo de rotas.
+Pedido recusado também conta, senão bastaria mandar lixo. Webhook e leituras
+ficam de fora. O teste de carga roda com um limite que não dispara, e o
+relatório diz por quê: o limitador só tira pedidos da disputa, então medir sem
+ele é o pior caso para o lock. Uma correção no meu próprio texto: eu tinha
+escrito que, com o limite ligado, parte das respostas viria como 429. As contas
+mostraram que não — cada paciente faz uns vinte pedidos por minuto no teste,
+abaixo dos trinta. O relatório passou a dizer o que é verdade: o valor alto é
+para o resultado não depender de como o limite está configurado. Defeitos
+reintroduzidos: chave por IP, rota sem limitador, uma instância por roteador,
+só as bem-sucedidas contando, limitador antes da autenticação — cada um
+derrubou o seu teste.
+
+**CORS (E10.2).** Em produção, `*` impede a subida, inclusive quando a variável
+falta, porque o padrão é `*`. Origem fora da forma que o navegador envia —
+barra no final, maiúsculas, com caminho — também impede, em qualquer ambiente:
+de outro jeito o site listado seria bloqueado sem explicação. O `render.yaml`
+libera só `http://localhost:4000`, a página de prova. A justificativa ficou
+honesta: com token no cabeçalho, e não em cookie, `*` não entregaria a sessão
+de ninguém; restringir é defesa em profundidade.
+
+**Exportação pseudonimizada (E10.3).** HMAC-SHA256 do id com um segredo que só
+o pesquisador tem — um hash simples seria desfeito calculando o de 1, 2, 3.
+Colunas numa lista fechada; a especialidade fica de fora por ser dado de saúde.
+A exportação recusa gravar dentro do repositório, que é público. O README
+registra o limite do que isso garante: pseudonimizado não é anônimo — com
+instantes exatos, uma linha exportada pode ser casada com o banco mesmo sem o
+segredo. A associação só se desfaz de vez com o descarte do segredo e do banco,
+que é o que a Seção 4.7 promete.
+
+**Histórico do Git (E10.4).** O auditor relata commit, arquivo, linha e tipo,
+nunca o valor. A primeira rodada acusou uma coisa: a URL do banco da integração
+contínua. Falso positivo meu — a regex pegava `localhost:5432` inteiro, e a
+exceção de `localhost` não casava. Corrigido, os 69 commits saíram limpos, e o
+commit do próprio auditor também: os segredos dos testes dele são montados em
+pedaços, senão o arquivo se acusaria. Um valor pediu cuidado antes de fechar a
+regra: num teste, `MERCADO_PAGO_ACCESS_TOKEN` recebe um texto de 53 caracteres
+que começa com `APP_USR-`. Conferido pela forma mascarada, sem ver o valor: o
+meio são palavras, e não os 32 dígitos hexadecimais de uma credencial. A regra
+ficou assim: em código, só a estrutura acusa. A auditoria passou a rodar na
+integração contínua, com o histórico completo.
+
+**Portão da Etapa 10: atingido.** Clone limpo numa pasta temporária, README ao
+pé da letra: `npm install`, `.env` a partir do modelo, as duas migrations, o
+seed, `npm run dev` e a rota de saúde respondendo `{"status":"ok"}`, e
+`npm test` com 583 testes passando. O único desvio foi inevitável: os bancos
+não foram criados de novo; as duas URLs vieram do `.env` de trabalho, copiadas
+por script, sem passar pela tela. Anotado no caminho:
+
+- nesta rede a porta 5432 é bloqueada, e o README já cobre isso
+  (`TRANSPORTE_BANCO=websocket`);
+- o npm atual avisa que bloqueou scripts de pós-instalação de `@firebase/util`
+  e `protobufjs`. Nada deixou de funcionar, e a suíte passou;
+- sem credencial do Firebase, a API sobe e diz claramente o que fica
+  desligado, como deveria;
+- a suíte de desligamento depende de sinais do Linux: pula no Windows e roda
+  na integração contínua.
