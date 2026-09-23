@@ -129,6 +129,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run verificar:portao` | Portão da Etapa 8 contra a API publicada: agenda, paga em sandbox e confere a confirmação pelo webhook |
 | `npm run pagina:token` | Página de prova da Etapa 9: registra o navegador como aparelho e recebe o lembrete (ver abaixo) |
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
+| `npm run exportar:pesquisa` | Conjunto de dados da pesquisa, pseudonimizado, numa pasta fora do repositório (ver abaixo) |
 
 ## Convenções da API
 
@@ -542,6 +543,53 @@ npm run verificar:token
 ```
 
 O script não imprime token, senha nem chave.
+
+## Exportação para a pesquisa
+
+A proposta promete que os dados coletados serão pseudonimizados (Seção 4.6) e
+descartados ao fim da pesquisa (4.7). A exportação é o que entrega esse
+conjunto: tira do banco só o que a análise precisa, com paciente e consulta
+trocados por pseudônimos.
+
+```powershell
+npm run exportar:pesquisa -- --saida C:\pesquisa\exportacao-2026-10
+```
+
+O banco é o de `DATABASE_URL`; para exportar o de produção, defina-a no
+terminal antes. O script mostra host e nome do banco, nunca usuário nem senha.
+
+**O segredo.** O pseudônimo é um HMAC-SHA256 do id com
+`SEGREDO_PSEUDONIMIZACAO` — a "informação adicional mantida separadamente" da
+LGPD, Art. 13. Gere-o no **seu** terminal e guarde-o como uma senha: no `.env`,
+que não vai para o Git, ou fora do repositório.
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+O mesmo segredo dá os mesmos pseudônimos de uma exportação para outra. Sem
+segredo, ou com menos de 32 caracteres, a exportação não roda.
+
+| Arquivo | Colunas |
+|---|---|
+| `consultas.csv` | `consulta`, `paciente`, `status`, `motivo_cancelamento`, `inicio`, `criada_em`, `paga` (1 se houve pagamento aprovado), `lembrete_enviado_em` |
+| `eventos.csv` | `paciente`, `consulta`, `ator` (paciente, sistema ou webhook), `acao`, `instante` — toda a auditoria, sem o campo `detalhe` |
+
+Instantes em UTC, ISO 8601. **Não saem:** nome, e-mail, telefone, data de
+nascimento, uid do Firebase, token de aparelho, profissional, especialidade
+(dado sensível, LGPD Art. 11), valor e identificadores do Mercado Pago. As
+colunas são uma lista fechada no código: uma coluna nova no banco só entra na
+exportação se alguém a acrescentar ali.
+
+**Guardas.** A exportação recusa gravar dentro do repositório, que é público;
+nunca sobrescreve uma exportação anterior; e confere que dois ids não deram o
+mesmo pseudônimo.
+
+**Pseudonimizado não é anônimo.** Os instantes são exatos, então, enquanto o
+banco existir, uma linha exportada pode ser casada com a linha dele mesmo sem o
+segredo. Até o fim da pesquisa, o conjunto continua sendo dado pessoal e deve
+ser tratado como tal. O descarte da Seção 4.7 — do segredo **e** do banco — é o
+que desfaz a associação de vez.
 
 ## Licença
 
