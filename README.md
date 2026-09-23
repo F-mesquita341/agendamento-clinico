@@ -369,7 +369,9 @@ npm run pagina:token
 ```
 
 Abra `http://localhost:4000` no Chrome ou no Edge, em janela **normal** — janela
-anônima e o Brave bloqueiam as notificações do Firebase.
+anônima e o Brave bloqueiam as notificações do Firebase. Pelo endereço
+`localhost`, e não `127.0.0.1`: a API publicada só aceita essa origem no
+navegador (ver CORS em [Publicação](#publicação)).
 
 **Registre o navegador ANTES de agendar.** A página não faz nada sozinha: é
 preciso entrar e clicar em "Ativar notificações". Depois, com a página aberta
@@ -392,6 +394,16 @@ este repositório. O painel pede as seis variáveis marcadas `sync: false`:
 `DATABASE_URL`, as três `FIREBASE_*` e as duas `MERCADO_PAGO_*`. As migrations
 rodam antes de a porta abrir (`npm run migrate && npm start`), porque uma
 publicação com migration pendente não pode subir pela metade.
+
+**CORS.** Em produção, `ORIGENS_PERMITIDAS` não pode ser `*`: a API se recusa a
+subir. O `render.yaml` libera só `http://localhost:4000`, a página de prova — é
+o único cliente de navegador que existe. O aplicativo Android e o webhook do
+Mercado Pago não são navegadores e não passam por CORS; os pedidos deles não
+levam o cabeçalho `Origin` e são atendidos como sempre. Cada origem se escreve
+como o navegador a envia — esquema, host e porta, sem barra no final —, e
+qualquer outra forma também impede a subida, em vez de bloquear o site sem
+explicação. Com o token no cabeçalho, e não em cookie, `*` não entregaria a
+sessão de ninguém a outro site; restringir é defesa em profundidade.
 
 **O webhook precisa ser configurado na aplicação DONA da credencial.** Um
 Access Token do Mercado Pago tem a forma

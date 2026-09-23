@@ -37,6 +37,7 @@ const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
  * @param {object} [deps.gateway] provedor de pagamento; nos testes, um dublê sem
  *        rede. Sem credencial configurada, o padrão responde "indisponível".
  * @param {string} [deps.segredoDoWebhook] chave que assina os avisos do provedor
+ * @param {string|string[]} [deps.origens] origens do CORS; padrão, as da configuração
  * @param {number} [deps.limiteDeEscritas] escritas por paciente por minuto; os
  *        testes passam um valor alto, para não tropeçar num limite que não é o
  *        assunto deles
@@ -45,6 +46,7 @@ function criarApp({
   verificarToken = criarVerificadorFirebase(),
   gateway = criarGatewayDePagamento(),
   segredoDoWebhook = config.MERCADO_PAGO_SEGREDO_WEBHOOK,
+  origens = config.origens,
   limiteDeEscritas = config.LIMITE_ESCRITAS_POR_MINUTO,
   pacientes,
   horarios,
@@ -61,7 +63,7 @@ function criarApp({
 
   app.disable('x-powered-by');
   app.use(helmet());
-  app.use(cors({ origin: config.origens }));
+  app.use(cors({ origin: origens }));
   app.use(express.json({ limit: '100kb' }));
 
   app.use(saude);

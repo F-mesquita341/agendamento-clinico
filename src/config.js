@@ -258,9 +258,47 @@ if (config.NODE_ENV === 'production') {
   }
 }
 
-config.origens =
-  config.ORIGENS_PERMITIDAS === '*'
-    ? '*'
-    : config.ORIGENS_PERMITIDAS.split(',').map((o) => o.trim()).filter(Boolean);
+// --- Origens do CORS ----------------------------------------------------------
+
+/**
+ * Uma origem é exatamente o que o navegador manda no cabeçalho Origin: esquema,
+ * host e porta, em minúsculas e sem barra no final. Qualquer outra forma —
+ * `http://localhost:4000/`, `HTTPS://Exemplo.com` — nunca coincidiria com o que
+ * chega, e o site listado ficaria bloqueado sem explicação.
+ */
+function ehOrigem(texto) {
+  try {
+    return new URL(texto).origin === texto;
+  } catch {
+    return false;
+  }
+}
+
+if (config.ORIGENS_PERMITIDAS.trim() === '*') {
+  // Com o token no cabeçalho, e não em cookie, `*` não entrega a sessão de
+  // ninguém: o navegador não anexa o token sozinho a pedidos de outro site.
+  // Restringir em produção é defesa em profundidade — continua valendo se essa
+  // premissa um dia mudar.
+  if (config.NODE_ENV === 'production') {
+    abortar(
+      'Em produção, ORIGENS_PERMITIDAS não pode ser *. Liste as origens que chamam a\n' +
+        'API pelo navegador, separadas por vírgula — ex.: http://localhost:4000, a\n' +
+        'página de prova da Etapa 9. O aplicativo Android e o webhook não passam por CORS.'
+    );
+  }
+  config.origens = '*';
+} else {
+  const origens = config.ORIGENS_PERMITIDAS.split(',').map((o) => o.trim()).filter(Boolean);
+  const invalidas = origens.filter((o) => !ehOrigem(o));
+
+  if (origens.length === 0 || invalidas.length > 0) {
+    abortar(
+      'ORIGENS_PERMITIDAS precisa listar origens como o navegador as envia:\n' +
+        'esquema, host e porta, sem barra no final — ex.: https://exemplo.com.br\n' +
+        (invalidas.length ? `Fora do formato: ${invalidas.join(', ')}` : 'A lista está vazia.')
+    );
+  }
+  config.origens = origens;
+}
 
 module.exports = config;

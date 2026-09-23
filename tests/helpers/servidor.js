@@ -41,6 +41,7 @@ async function iniciar({
   gateway,
   segredoDoWebhook,
   limiteDeEscritas = SEM_LIMITE_NA_PRATICA,
+  origens,
 } = {}) {
   // Porta 0: o sistema operacional escolhe uma livre. Sem `gateway`, o app usa
   // o padrão — sem credencial no ambiente de teste, um gateway "indisponível".
@@ -48,6 +49,7 @@ async function iniciar({
     verificarToken,
     relogio,
     limiteDeEscritas,
+    ...(origens ? { origens } : {}),
     ...(gateway ? { gateway } : {}),
     ...(segredoDoWebhook ? { segredoDoWebhook } : {}),
   }).listen(0);
