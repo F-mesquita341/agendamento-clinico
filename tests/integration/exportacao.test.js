@@ -222,10 +222,19 @@ describe('exportação para a pesquisa', () => {
 
   test('recusa gravar dentro do repositório, e não cria nada lá', async () => {
     const dentro = path.join(RAIZ, 'docs', 'exportacao-que-nao-pode-existir');
-
-    await expect(exportar({ saida: dentro, segredo: SEGREDO })).rejects.toThrow(Recusa);
-
+    // Se a pasta já existisse, o teste não provaria nada — e a limpeza abaixo
+    // apagaria o que não é dela.
     expect(fs.existsSync(dentro)).toBe(false);
+
+    try {
+      await expect(exportar({ saida: dentro, segredo: SEGREDO })).rejects.toThrow(Recusa);
+
+      expect(fs.existsSync(dentro)).toBe(false);
+    } finally {
+      // Se a guarda falhar, o teste cai — mas não deixa dados de teste dentro
+      // do repositório, esperando um `git add`.
+      fs.rmSync(dentro, { recursive: true, force: true });
+    }
   });
 
   test('recusa sobrescrever uma exportação anterior', async () => {
@@ -236,6 +245,18 @@ describe('exportação para a pesquisa', () => {
 
     expect(fs.readFileSync(path.join(pasta, 'consultas.csv'), 'utf8')).toBe(antes);
   });
+
+  // Só no Windows: no Linux a raiz "/" sempre existe.
+  (process.platform === 'win32' ? test : test.skip)(
+    'disco que não existe é recusado com mensagem, e não com erro do sistema',
+    async () => {
+      const letra = 'ZYXWVUTSRQPONMLKJIHGFED'.split('').find((l) => !fs.existsSync(`${l}:\\`));
+
+      await expect(exportar({ saida: `${letra}:\\pesquisa`, segredo: SEGREDO })).rejects.toThrow(
+        /disco que não existe/
+      );
+    }
+  );
 
   test('sem segredo adequado, não grava nada', async () => {
     const saida = path.join(pasta, 'sem-segredo');

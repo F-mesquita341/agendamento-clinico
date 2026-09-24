@@ -159,7 +159,10 @@ class RepositorioDeConsultas {
 
   /**
    * Ids das consultas que merecem lembrete agora — confirmadas, ainda não
-   * avisadas, começando nas próximas 24 horas.
+   * avisadas, começando nas próximas 24 horas — de pacientes com ao menos um
+   * aparelho registrado. Sem aparelho, a consulta fica de fora e o lembrete
+   * não é consumido: quando o paciente ativar as notificações, a rodada
+   * seguinte a alcança.
    *
    * @returns {Promise<Array<number>>}
    */
@@ -179,7 +182,10 @@ class RepositorioDeConsultas {
     naoImplementado('RepositorioDeConsultas.reservarLembrete');
   }
 
-  /** Desfaz a marca quando o envio falhou por motivo momentâneo. */
+  /**
+   * Desfaz a marca, devolvendo a consulta à fila: quando o envio falhou por
+   * motivo momentâneo, ou quando o aparelho sumiu entre a varredura e o envio.
+   */
   async desmarcarLembrete(_consultaId) {
     naoImplementado('RepositorioDeConsultas.desmarcarLembrete');
   }

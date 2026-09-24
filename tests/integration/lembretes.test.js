@@ -109,7 +109,7 @@ describe('quem recebe lembrete', () => {
 
     const resultado = await rotina.executar();
 
-    expect(resultado).toMatchObject({ enviados: 1, semAparelho: 0, adiados: 0, falhas: 0 });
+    expect(resultado).toMatchObject({ enviados: 1, semAparelho: 0, aparelhosInvalidos: 0, adiados: 0, falhas: 0 });
     expect(notificador.quantidade).toBe(1);
     expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);
   });
@@ -173,7 +173,8 @@ describe('quem recebe lembrete', () => {
 
     const resultado = await rotina.executar();
 
-    expect(resultado).toMatchObject({ enviados: 0, semAparelho: 1 });
+    // Volta à fila: conta como "sem aparelho", e não como aparelho inválido.
+    expect(resultado).toMatchObject({ enviados: 0, semAparelho: 1, aparelhosInvalidos: 0 });
     expect(notificador.quantidade).toBe(0);
     expect(await marcaDoLembrete(consultaId)).toBeNull();
   });
@@ -272,7 +273,8 @@ describe('aparelhos que o provedor recusa', () => {
 
     const resultado = await rotina.executar();
 
-    expect(resultado).toMatchObject({ enviados: 0, semAparelho: 1 });
+    // Não sai mais: conta à parte do "sem aparelho", que volta à fila.
+    expect(resultado).toMatchObject({ enviados: 0, semAparelho: 0, aparelhosInvalidos: 1 });
     expect(await auditoriaDeLembrete()).toEqual([]);
     expect(await tokensGuardados()).toEqual([]);
     expect(await marcaDoLembrete(consultaId)).toEqual(AGORA);

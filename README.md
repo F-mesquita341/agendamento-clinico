@@ -165,7 +165,10 @@ interpretar o texto da mensagem.
 
 Cada paciente tem até `LIMITE_ESCRITAS_POR_MINUTO` escritas por minuto (30 por
 padrão). Passando disso, a API responde **429** `MUITAS_REQUISICOES`, com a
-ação `tentar_novamente` e o cabeçalho `Retry-After`, em segundos.
+ação `tentar_novamente` e o cabeçalho `Retry-After`, em segundos. Toda escrita
+também leva os cabeçalhos `RateLimit` e `RateLimit-Policy`, com quanto resta. Os
+três ficam expostos pelo CORS, para um cliente de navegador também conseguir
+lê-los.
 
 - **A chave é o paciente, não o IP.** Celulares atrás do NAT da operadora
   dividem o mesmo endereço, e um limite por IP puniria um desconhecido pelo
@@ -610,11 +613,22 @@ sai com erro se achar algo. Roda na integração contínua a cada envio.
 
 Não acusa a configuração do app Web do Firebase (`apiKey`, `appId`, VAPID), que
 é pública por natureza, nem o banco descartável da integração contínua ou os
-valores falsos que os testes usam de propósito.
+valores falsos que os testes usam de propósito. Em código e em texto corrido
+(`.md`, `.txt`), variável secreta só é acusada quando o valor tem forma de
+segredo gerado: numa frase como "o `MERCADO_PAGO_ACCESS_TOKEN`: a credencial da
+conta de teste", o "valor" é uma palavra. Uma credencial de verdade colada num
+texto continua acusada pela própria estrutura.
 
 Se acusar algo, o que resolve é **trocar a credencial**. Reescrever o histórico
 não desfaz uma exposição que já foi publicada: o valor pode ter sido copiado
 antes.
+
+Se, revisado, o achado não for credencial, ele vai para
+[`scripts/excecoes-da-auditoria.js`](scripts/excecoes-da-auditoria.js) com
+commit, arquivo, linha, tipo e o motivo. Sem essa saída, um falso positivo
+deixaria a integração contínua vermelha para sempre, porque o histórico não
+muda. A exceção precisa coincidir em tudo com o achado, e credencial de verdade
+nunca entra ali.
 
 ## Licença
 

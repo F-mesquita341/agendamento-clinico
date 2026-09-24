@@ -22,6 +22,7 @@ const {
   examinarLinha,
   examinarCaminho,
   relatorio,
+  ExcecaoInvalida,
 } = require('../../scripts/auditar-historico');
 
 const BLOCO_DE_CHAVE = ['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ');
@@ -58,8 +59,9 @@ describe('o que é acusado', () => {
     ['URL do banco com senha no .env', 'URL do PostgreSQL com senha', `DATABASE_URL=${URL_REAL}`, '.env'],
     ['segredo no .env', 'valor em variável secreta', `${'MERCADO_PAGO_SEGREDO_WEBHOOK'}=${SEGREDO_GERADO}`, '.env'],
     ['segredo num YAML', 'valor em variável secreta', `  ${'MERCADO_PAGO_SEGREDO_WEBHOOK'}: ${SEGREDO_GERADO}`, 'x.yaml'],
-    // Em código, só o valor com forma de segredo gerado.
+    // Em código e em texto corrido, só o valor com forma de segredo gerado.
     ['segredo gerado em código', 'valor em variável secreta', `${'SEGREDO_PSEUDONIMIZACAO'}: '${SEGREDO_GERADO}',`, 'x.js'],
+    ['segredo colado na documentação', 'valor em variável secreta', `${'MERCADO_PAGO_SEGREDO_WEBHOOK'}=${SEGREDO_GERADO}`, 'docs/diario.md'],
   ])('%s', (_rotulo, tipo, linha, arquivo) => {
     expect(examinarLinha(linha, arquivo)).toContain(tipo);
   });
@@ -91,6 +93,13 @@ describe('o que não é acusado', () => {
     ['token falso com a forma aproximada', `    MERCADO_PAGO_ACCESS_TOKEN: '${'APP_USR'}-1234567890123456-092026-credencial-invalida-0',`, 'x.test.js'],
     ['o segredo do GitHub Actions', '      MERCADO_PAGO_ACCESS_TOKEN: ${{ secrets.MP_TOKEN }}', 'ci.yml'],
     ['a chave pública do app Web do Firebase', `apiKey: '${'AIza'}Sy${'B'.repeat(33)}'`, 'pagina.js'],
+    // Frases de documentação. Acusadas, deixariam a integração contínua
+    // vermelha para sempre: o histórico não muda.
+    ['frase do diário com dois-pontos', 'O MERCADO_PAGO_ACCESS_TOKEN: a credencial da conta de teste vendedora.', 'docs/diario.md'],
+    ['frase do diário com igual', 'Troquei o DATABASE_URL=novo no painel do Render.', 'docs/diario.md'],
+    ['tabela do README', '| DATABASE_URL: | string de conexão do Neon |', 'README.md'],
+    ['exemplo abreviado no README', 'MERCADO_PAGO_ACCESS_TOKEN=APP_USR-...', 'README.md'],
+    ['instrução no README', 'SEGREDO_PSEUDONIMIZACAO=cole-aqui-o-que-o-comando-gerou', 'README.md'],
   ])('%s', (_rotulo, linha, arquivo) => {
     expect(examinarLinha(linha, arquivo)).toEqual([]);
   });
@@ -139,6 +148,12 @@ describe('sobre um repositório de verdade', () => {
     gravar('docs/notas.md', `token: ${TOKEN_MP}\n`);
     commits.ramo = commitar('experimento');
     git('checkout', '-q', 'principal');
+
+    // Um .env renomeado: o achado do renomeio sai com o nome antigo.
+    gravar('.env.local', 'A=1\nB=2\nC=3\n');
+    commits.envLocal = commitar('env local');
+    git('mv', '.env.local', 'config.txt');
+    commits.renomeio = commitar('renomeia');
   });
 
   afterAll(() => {
@@ -148,7 +163,17 @@ describe('sobre um repositório de verdade', () => {
   test('lê todos os commits, de todos os ramos', async () => {
     const { commits: lidos } = await auditar({ raiz: pasta });
 
-    expect(lidos).toBe(4);
+    expect(lidos).toBe(6);
+  });
+
+  test('no renomeio, o achado sai com o nome antigo, e o novo não é acusado', async () => {
+    const { achados } = await auditar({ raiz: pasta });
+    const doRenomeio = achados.filter((a) => a.commit === commits.renomeio);
+
+    expect(doRenomeio).toEqual([
+      { commit: commits.renomeio, arquivo: '.env.local', linha: null, tipo: 'arquivo .env versionado' },
+    ]);
+    expect(achados.filter((a) => a.arquivo === 'config.txt')).toEqual([]);
   });
 
   test('acha o que foi apagado depois, e o que está num ramo não juntado', async () => {
@@ -180,6 +205,56 @@ describe('sobre um repositório de verdade', () => {
     expect(texto).toMatch(/TROCAR a credencial/);
   });
 
+  describe('exceções revisadas', () => {
+    const excecao = () => ({
+      commit: commits.vazamento.slice(0, 10),
+      arquivo: 'src/chave.js',
+      linha: 2,
+      tipo: 'bloco de chave privada',
+      motivo: 'Chave de exemplo do próprio teste.',
+    });
+
+    test('tiram exatamente o achado delas, e o relatório diz quantos', async () => {
+      const r = await auditar({ raiz: pasta, excecoes: [excecao()] });
+
+      expect(r.aceitos).toBe(1);
+      expect(r.semUso).toEqual([]);
+      expect(r.achados).not.toContainEqual(expect.objectContaining({ arquivo: 'src/chave.js' }));
+      // O resto continua acusado.
+      expect(r.achados).toContainEqual(
+        expect.objectContaining({ commit: commits.vazamento, arquivo: '.env', linha: 1 })
+      );
+      expect(relatorio(r)).toMatch(/1 falso\(s\) positivo\(s\) já revisado/);
+    });
+
+    test('a que não coincide em tudo não tira nada, e é apontada como sem uso', async () => {
+      const r = await auditar({ raiz: pasta, excecoes: [{ ...excecao(), linha: 3 }] });
+
+      expect(r.aceitos).toBe(0);
+      expect(r.achados).toContainEqual(expect.objectContaining({ arquivo: 'src/chave.js', linha: 2 }));
+      expect(r.semUso).toHaveLength(1);
+      expect(relatorio(r)).toMatch(/sem achado correspondente/);
+    });
+
+    test.each([
+      ['sem motivo', { motivo: undefined }],
+      ['com motivo vazio', { motivo: '   ' }],
+      ['com hash curto', { commit: 'abc123' }],
+      ['com tipo inventado', { tipo: 'coisa suspeita' }],
+      ['com linha em texto', { linha: '2' }],
+    ])('exceção %s é recusada antes de ler o histórico', async (_rotulo, troca) => {
+      await expect(auditar({ raiz: pasta, excecoes: [{ ...excecao(), ...troca }] })).rejects.toThrow(
+        ExcecaoInvalida
+      );
+    });
+
+    test('a lista versionada do projeto é válida', async () => {
+      await expect(
+        auditar({ raiz: pasta, excecoes: require('../../scripts/excecoes-da-auditoria') })
+      ).resolves.toMatchObject({ commits: 6 });
+    });
+  });
+
   test('repositório limpo não tem achado', async () => {
     const limpo = fs.mkdtempSync(path.join(os.tmpdir(), 'historico-limpo-'));
     try {
@@ -190,7 +265,7 @@ describe('sobre um repositório de verdade', () => {
 
       const resultado = await auditar({ raiz: limpo });
 
-      expect(resultado).toEqual({ commits: 1, achados: [] });
+      expect(resultado).toEqual({ commits: 1, achados: [], aceitos: 0, semUso: [] });
       expect(relatorio(resultado)).toMatch(/✓ Nenhuma credencial encontrada/);
     } finally {
       fs.rmSync(limpo, { recursive: true, force: true });

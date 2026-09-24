@@ -129,11 +129,15 @@ function subir() {
   });
   rotinaDeLembretes = agendar(() => lembrar.executar(), INTERVALO_DOS_LEMBRETES_MS, {
     nome: 'lembretes de consulta',
-    aoTerminar: ({ enviados, semAparelho, adiados, falhas }) => {
-      if (enviados || semAparelho || adiados || falhas) {
+    // Os dois "sem aparelho" são opostos, e o log os separa: um volta à fila,
+    // o outro não sai mais. Ver EnviarLembretes.executar.
+    aoTerminar: ({ enviados, semAparelho, aparelhosInvalidos, adiados, falhas }) => {
+      if (enviados || semAparelho || aparelhosInvalidos || adiados || falhas) {
         console.log(
-          `Lembretes: ${enviados} enviado(s), ${semAparelho} sem aparelho registrado, ` +
-            `${adiados} adiado(s), ${falhas} falha(s).`
+          `Lembretes: ${enviados} enviado(s), ${adiados} adiado(s), ` +
+            `${semAparelho} sem aparelho no envio (voltam à fila), ` +
+            `${aparelhosInvalidos} com todos os aparelhos inválidos (não saem mais), ` +
+            `${falhas} falha(s).`
         );
       }
     },

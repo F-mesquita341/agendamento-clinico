@@ -38,11 +38,25 @@ class EnviarLembretes {
     this.limite = limite;
   }
 
-  /** @returns {Promise<{enviados: number, semAparelho: number, adiados: number, falhas: number}>} */
+  /**
+   * Cada consulta termina num de cinco desfechos, e os dois de "sem aparelho"
+   * são opostos — por isso contados à parte:
+   *
+   *   enviados            o lembrete saiu;
+   *   semAparelho         o aparelho sumiu entre a varredura e o envio: a marca
+   *                       foi desfeita, e a consulta volta à fila;
+   *   aparelhosInvalidos  o provedor recusou todos os aparelhos: a marca fica,
+   *                       e este lembrete não sai mais;
+   *   adiados             o envio falhou por motivo momentâneo: volta à fila;
+   *   falhas              nem a marca pôde ser desfeita: o lembrete se perdeu.
+   *
+   * @returns {Promise<{enviados: number, semAparelho: number, aparelhosInvalidos: number,
+   *          adiados: number, falhas: number}>}
+   */
   async executar() {
     const agora = this.relogio.agora();
     const candidatas = await this.consultas.aguardandoLembrete(agora, this.limite);
-    const resultado = { enviados: 0, semAparelho: 0, adiados: 0, falhas: 0 };
+    const resultado = { enviados: 0, semAparelho: 0, aparelhosInvalidos: 0, adiados: 0, falhas: 0 };
 
     for (const consultaId of candidatas) {
       // Só desfaz a marca quem a gravou. Se o próprio `reservarLembrete`
@@ -55,11 +69,7 @@ class EnviarLembretes {
         // varredura e o bloqueio.
         if (!reservada) continue;
 
-        if (await this.avisar(reservada, agora)) {
-          resultado.enviados += 1;
-        } else {
-          resultado.semAparelho += 1;
-        }
+        resultado[await this.avisar(reservada, agora)] += 1;
       } catch (erro) {
         // O envio falhou por motivo momentâneo: devolve a consulta à fila.
         // Uma consulta problemática não impede as outras de serem avisadas.
@@ -83,7 +93,10 @@ class EnviarLembretes {
     return resultado;
   }
 
-  /** @returns {Promise<boolean>} se havia aparelho para avisar */
+  /**
+   * @returns {Promise<'enviados'|'semAparelho'|'aparelhosInvalidos'>} o desfecho,
+   *          com o nome do contador de `executar`
+   */
   async avisar({ consultaId, pacienteId, inicio }, agora) {
     const tokens = await this.dispositivos.doPaciente(pacienteId);
     if (tokens.length === 0) {
@@ -93,7 +106,7 @@ class EnviarLembretes {
       // desfeita, e se a pessoa ativar as notificações de novo dentro da
       // janela, ainda é lembrada.
       await this.consultas.desmarcarLembrete(consultaId);
-      return false;
+      return 'semAparelho';
     }
 
     const { titulo, corpo } = textoDoLembrete(new Date(inicio), agora);
@@ -119,7 +132,7 @@ class EnviarLembretes {
     // Todos os aparelhos estavam mortos: ninguém recebeu. Contar como enviado
     // seria registrar entrega que não houve. A marca fica de pé: os tokens
     // acabaram de ser apagados, não há o que reenviar.
-    return entregues > 0;
+    return entregues > 0 ? 'enviados' : 'aparelhosInvalidos';
   }
 
   async contabilizar(consultaId, { entregues, invalidos }) {

@@ -100,7 +100,10 @@ function caminhoReal(alvo) {
   const faltando = [];
   while (!fs.existsSync(existente)) {
     const pai = path.dirname(existente);
-    if (pai === existente) break;
+    if (pai === existente) {
+      // Chegou à raiz sem achar nada: no Windows, um disco que não existe.
+      throw new Recusa(`Recusado: ${path.resolve(alvo)} está num disco que não existe.`);
+    }
     faltando.unshift(path.basename(existente));
     existente = pai;
   }

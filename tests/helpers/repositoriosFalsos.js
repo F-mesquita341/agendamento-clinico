@@ -118,6 +118,10 @@ class ConsultasFalsas extends RepositorioDeConsultas {
     this.itens = new Map();
     this.horarioDaConsulta = new Map();
     this.horarios = null;
+    // O adaptador real só traz para lembrete quem tem aparelho: ele lê a
+    // tabela `dispositivo`. O dublê não tem essa tabela; quem tem aparelho é
+    // dito aqui, pelo id do paciente.
+    this.pacientesComAparelho = new Set();
   }
 
   registrar(consulta, horario) {
@@ -210,6 +214,7 @@ class ConsultasFalsas extends RepositorioDeConsultas {
 
   async aguardandoLembrete(agora, limite) {
     return [...this.itens.values()]
+      .filter((c) => this.pacientesComAparelho.has(String(c.pacienteId)))
       .filter((c) => c.precisaDeLembrete(this.horarioDaConsulta.get(String(c.id))?.inicio, agora))
       .sort((a, b) => {
         const inicioA = this.horarioDaConsulta.get(String(a.id))?.inicio ?? 0;

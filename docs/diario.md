@@ -1351,7 +1351,8 @@ achava. Refeito no lugar certo, caiu.
 ## 23/09/2026 — Etapa 10: endurecimento
 
 Os quatro itens que o relatório de revisão de 22/09 deixou para fechar a API,
-cada um num commit, cada teste confirmado pelo defeito que ele cobre.
+cada um num commit, cada mecanismo confirmado por um defeito reintroduzido de
+propósito — dezoito nas quatro partes, e mais dois no fechamento da Etapa 9.
 
 **Limite de escritas (E10.1).** Trinta escritas por minuto, por paciente — não
 por IP: celulares atrás do NAT da operadora dividem endereço, e o teste de carga
@@ -1413,3 +1414,42 @@ por script, sem passar pela tela. Anotado no caminho:
   desligado, como deveria;
 - a suíte de desligamento depende de sinais do Linux: pula no Windows e roda
   na integração contínua.
+
+## 24/09/2026 — Revisão minuciosa da Etapa 10
+
+Antes do push, a branch inteira relida, e o que a leitura não garante,
+verificado de verdade: o limitador com os cabeçalhos de proxy que o Render
+manda (nenhum aviso da biblioteca); a exportação sobre o banco de
+desenvolvimento, só lendo, com nenhum dos 22 dados pessoais conferidos nos
+arquivos; o relatório de carga montado com os dados reais de 19/09, porque o
+modo ensaio da integração contínua nunca monta esse texto. Oito achados, todos
+corrigidos, cada um com teste e com o defeito reintroduzido derrubando-o.
+
+**O mais sério era do auditor.** Ele acusava frase de documentação como
+segredo: "o `MERCADO_PAGO_ACCESS_TOKEN`: a credencial da conta de teste" dava
+"valor em variável secreta". Rodando na integração contínua sobre o histórico
+inteiro, uma frase dessas no diário a deixaria vermelha para sempre — o
+histórico não muda, e não havia como registrar um falso positivo revisado.
+Agora, em texto corrido, variável secreta só é acusada com valor em forma de
+segredo gerado, como em código; uma credencial de verdade colada num texto
+continua acusada pela estrutura. E há a saída que faltava:
+`scripts/excecoes-da-auditoria.js`, onde cada falso positivo revisado entra com
+commit, arquivo, linha, tipo e motivo, e só vale se coincidir em tudo.
+
+Também do auditor: num arquivo renomeado, o achado pelo nome antigo saía com o
+nome novo — `.env` renomeado para `config.txt` virava "config.txt é um .env".
+
+**Dos lembretes.** O contrato do domínio não dizia que a varredura só traz quem
+tem aparelho, e o dublê não seguia essa regra; os dois agora seguem, com um
+teste de unidade que o prova sem banco. E o contador "sem aparelho" da rotina
+misturava dois desfechos opostos: o aparelho que sumiu no meio — a consulta
+volta à fila — e todos os aparelhos recusados pelo provedor — o lembrete não sai
+mais. O log dizia "sem aparelho registrado" para os dois. Agora são
+`semAparelho` e `aparelhosInvalidos`, e o log diz qual volta e qual não.
+
+**Menores.** O CORS passou a expor `Retry-After` e `RateLimit` ao navegador —
+antes, só o aplicativo Android conseguia lê-los. O teste da guarda da
+exportação deixava uma pasta dentro de `docs/` quando a guarda falhava, e
+limpa agora o que criou. Um disco que não existe em `--saida` dava erro do
+sistema com pilha; agora é recusado com mensagem. E este diário dizia que cada
+teste tinha sido confirmado por um defeito; foi cada mecanismo.

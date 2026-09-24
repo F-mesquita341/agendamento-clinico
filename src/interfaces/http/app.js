@@ -63,7 +63,15 @@ function criarApp({
 
   app.disable('x-powered-by');
   app.use(helmet());
-  app.use(cors({ origin: origens }));
+  app.use(
+    cors({
+      origin: origens,
+      // Sem isto, o navegador esconde do JavaScript os cabeçalhos do limite de
+      // escritas: fora da lista curta que o CORS libera por padrão, só aparece
+      // o que o servidor expõe. O aplicativo Android os lê de qualquer jeito.
+      exposedHeaders: ['Retry-After', 'RateLimit', 'RateLimit-Policy'],
+    })
+  );
   app.use(express.json({ limit: '100kb' }));
 
   app.use(saude);

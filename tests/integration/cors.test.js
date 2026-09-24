@@ -44,6 +44,16 @@ describe('CORS com lista de origens', () => {
     expect(r.headers.vary).toMatch(/\bOrigin\b/);
   });
 
+  test('os cabeçalhos do limite de escritas ficam legíveis para o JavaScript da página', async () => {
+    // Retry-After e RateLimit não estão na lista curta que o CORS libera por
+    // padrão. Sem expô-los, um cliente de navegador receberia o 429 sem
+    // conseguir ler quanto esperar.
+    const r = await request(servidor).get('/saude').set('Origin', PAGINA_DE_PROVA);
+    const expostos = (r.headers['access-control-expose-headers'] ?? '').toLowerCase().split(/\s*,\s*/);
+
+    expect(expostos).toEqual(expect.arrayContaining(['retry-after', 'ratelimit', 'ratelimit-policy']));
+  });
+
   test('pedido sem origem — o do aplicativo Android e o do webhook — segue atendido', async () => {
     const r = await request(servidor).get('/saude');
 

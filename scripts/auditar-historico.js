@@ -26,12 +26,22 @@
  *     o postgres:postgres@localhost da integração contínua;
  *   - senha do Neon (npg_...) e token do GitHub;
  *   - valor atribuído a uma variável secreta (MERCADO_PAGO_*, FIREBASE_PRIVATE_KEY,
- *     SEGREDO_PSEUDONIMIZACAO, DATABASE_URL*) em arquivo de configuração. Em
- *     código, só quando o valor tem forma de segredo gerado — os testes
- *     atribuem valores falsos a essas variáveis de propósito.
+ *     SEGREDO_PSEUDONIMIZACAO, DATABASE_URL*). Em arquivo de configuração,
+ *     qualquer valor que não seja exemplo. Em código e em texto corrido, só
+ *     valor com forma de segredo gerado: os testes atribuem valores falsos a
+ *     essas variáveis de propósito, e na documentação "NOME: valor" é quase
+ *     sempre frase — "o MERCADO_PAGO_ACCESS_TOKEN: a credencial da conta de
+ *     teste". Uma credencial de verdade colada num texto continua acusada pela
+ *     própria estrutura.
  *
  * O que NÃO é acusado: a configuração do app Web do Firebase (apiKey "AIza…",
  * appId, VAPID) é pública por natureza — feita para ficar embutida na página.
+ *
+ * FALSO POSITIVO. O histórico não muda: um achado indevido acusaria para
+ * sempre, e a integração contínua ficaria vermelha sem saída. Um falso positivo
+ * revisado vai para ./excecoes-da-auditoria.js, com commit, arquivo, linha,
+ * tipo e o motivo. Exceção é só para o que não é credencial — credencial de
+ * verdade se troca.
  *
  * Limites: merges sem resolução manual de conflito não acrescentam linhas e não
  * são lidos; arquivos binários só são conferidos pelo nome. Commits que nunca
@@ -46,6 +56,7 @@ const readline = require('node:readline');
 const RAIZ = path.resolve(__dirname, '..');
 
 const EXTENSOES_DE_CODIGO = new Set(['.js', '.cjs', '.mjs', '.ts', '.jsx', '.tsx']);
+const EXTENSOES_DE_TEXTO = new Set(['.md', '.txt', '.rst', '.adoc']);
 
 // Palavras que marcam um valor como exemplo, e não como credencial.
 const MARCADOR_DE_EXEMPLO = /exemplo|example|falso|fake|mentira|nao-real|placeholder|usuario|senha|password|xxx/i;
@@ -107,17 +118,79 @@ function examinarLinha(linha, arquivo) {
     }
   }
 
-  const emCodigo = EXTENSOES_DE_CODIGO.has(path.extname(arquivo).toLowerCase());
+  const extensao = path.extname(arquivo).toLowerCase();
   for (const [, , aspas, valor] of linha.matchAll(VARIAVEL_SECRETA)) {
-    // Em código, `DATABASE_URL: z.string()` é declaração, não valor: sem
-    // aspas, não há literal para julgar.
-    if (emCodigo ? aspas && formaDeSegredoGerado(valor) : !valorDeExemplo(valor)) {
+    let acusar;
+    if (EXTENSOES_DE_CODIGO.has(extensao)) {
+      // Em código, `DATABASE_URL: z.string()` é declaração, não valor: sem
+      // aspas, não há literal para julgar.
+      acusar = Boolean(aspas) && formaDeSegredoGerado(valor);
+    } else if (EXTENSOES_DE_TEXTO.has(extensao)) {
+      acusar = formaDeSegredoGerado(valor);
+    } else {
+      acusar = !valorDeExemplo(valor);
+    }
+    if (acusar) {
       tipos.push('valor em variável secreta');
       break;
     }
   }
 
   return tipos;
+}
+
+const TIPOS = [
+  ...PADROES.map((p) => p.tipo),
+  'URL do PostgreSQL com senha',
+  'valor em variável secreta',
+  'arquivo .env versionado',
+  'arquivo de chave',
+];
+
+class ExcecaoInvalida extends Error {}
+
+function validarExcecoes(excecoes) {
+  if (!Array.isArray(excecoes)) {
+    throw new ExcecaoInvalida('excecoes-da-auditoria.js precisa exportar uma lista.');
+  }
+  excecoes.forEach((e, i) => {
+    const problemas = [];
+    if (typeof e?.commit !== 'string' || !/^[0-9a-f]{10,40}$/.test(e.commit)) {
+      problemas.push('commit (ao menos 10 dígitos do hash)');
+    }
+    if (typeof e?.arquivo !== 'string' || e.arquivo === '') problemas.push('arquivo');
+    if (!(e?.linha === null || Number.isInteger(e?.linha))) {
+      problemas.push('linha (número, ou null para achado pelo nome do arquivo)');
+    }
+    if (!TIPOS.includes(e?.tipo)) problemas.push('tipo');
+    if (typeof e?.motivo !== 'string' || e.motivo.trim().length < 10) problemas.push('motivo');
+    if (problemas.length > 0) {
+      throw new ExcecaoInvalida(`Exceção nº ${i + 1} inválida — confira: ${problemas.join(', ')}.`);
+    }
+  });
+}
+
+/**
+ * Tira os falsos positivos já revisados. A exceção precisa coincidir em tudo —
+ * commit, arquivo, linha e tipo —, para não cobrir nada além do que foi
+ * revisado.
+ */
+function aplicarExcecoes(achados, excecoes) {
+  validarExcecoes(excecoes);
+  const usadas = new Set();
+  const restantes = achados.filter((a) => {
+    const i = excecoes.findIndex(
+      (e) => a.commit.startsWith(e.commit) && a.arquivo === e.arquivo && a.linha === e.linha && a.tipo === e.tipo
+    );
+    if (i === -1) return true;
+    usadas.add(i);
+    return false;
+  });
+  return {
+    achados: restantes,
+    aceitos: achados.length - restantes.length,
+    semUso: excecoes.filter((_, i) => !usadas.has(i)),
+  };
 }
 
 /** Tipos de achado no próprio nome de um arquivo que já existiu. */
@@ -136,10 +209,18 @@ function examinarCaminho(arquivo) {
  * Lê o histórico como um fluxo — num repositório grande, o texto inteiro não
  * caberia na memória de uma vez.
  *
- * @returns {Promise<{ commits: number, achados: Array<{ commit, arquivo, linha, tipo }> }>}
+ * @param {object} [opcoes]
+ * @param {string} [opcoes.raiz] repositório a auditar
+ * @param {Array} [opcoes.excecoes] falsos positivos revisados — ver o cabeçalho
+ * @returns {Promise<{ commits: number, achados: Array<{ commit, arquivo, linha, tipo }>,
+ *          aceitos: number, semUso: Array }>}
  */
-function auditar({ raiz = RAIZ } = {}) {
+function auditar({ raiz = RAIZ, excecoes = [] } = {}) {
   return new Promise((resolve, reject) => {
+    // Exceção malformada é recusada antes de ler o histórico. Dentro da
+    // Promise, o erro vira rejeição, como qualquer outra falha daqui.
+    validarExcecoes(excecoes);
+
     const git = spawn(
       'git',
       [
@@ -165,11 +246,14 @@ function auditar({ raiz = RAIZ } = {}) {
     let numero = 0;
     let erro = '';
 
-    const registrar = (tipo, linha = null) => {
-      const chave = `${commit}\n${arquivo}\n${linha}\n${tipo}`;
+    // O caminho vai explícito: num arquivo renomeado, o achado pelo nome
+    // antigo precisa sair com o nome antigo — `.env` renomeado para
+    // `config.txt` não faz de `config.txt` um .env.
+    const registrar = (tipo, caminho, linha = null) => {
+      const chave = `${commit}\n${caminho}\n${linha}\n${tipo}`;
       if (vistos.has(chave)) return;
       vistos.add(chave);
-      achados.push({ commit, arquivo, linha, tipo });
+      achados.push({ commit, arquivo: caminho, linha, tipo });
     };
 
     git.stderr.on('data', (parte) => {
@@ -187,9 +271,10 @@ function auditar({ raiz = RAIZ } = {}) {
       }
       const cabecalho = /^diff --git a\/(.+) b\/(.+)$/.exec(texto);
       if (cabecalho) {
-        arquivo = cabecalho[2];
-        for (const tipo of examinarCaminho(cabecalho[1])) registrar(tipo);
-        for (const tipo of examinarCaminho(arquivo)) registrar(tipo);
+        const [, antes, depois] = cabecalho;
+        arquivo = depois;
+        for (const tipo of examinarCaminho(antes)) registrar(tipo, antes);
+        for (const tipo of examinarCaminho(depois)) registrar(tipo, depois);
         return;
       }
       const trecho = /^@@ -\S+ \+(\d+)/.exec(texto);
@@ -198,7 +283,7 @@ function auditar({ raiz = RAIZ } = {}) {
         return;
       }
       if (texto.startsWith('+') && !texto.startsWith('+++')) {
-        for (const tipo of examinarLinha(texto.slice(1), arquivo)) registrar(tipo, numero);
+        for (const tipo of examinarLinha(texto.slice(1), arquivo)) registrar(tipo, arquivo, numero);
         numero += 1;
       }
     });
@@ -213,7 +298,7 @@ function auditar({ raiz = RAIZ } = {}) {
         reject(new Error(`git log terminou com código ${codigoDoGit}: ${erro.trim()}`));
         return;
       }
-      resolve({ commits, achados });
+      resolve({ commits, ...aplicarExcecoes(achados, excecoes) });
     };
     leitor.on('close', () => {
       leituraTerminou = true;
@@ -226,7 +311,7 @@ function auditar({ raiz = RAIZ } = {}) {
   });
 }
 
-function relatorio({ commits, achados }) {
+function relatorio({ commits, achados, aceitos = 0, semUso = [] }) {
   const linhas = [`\nHistórico do Git: ${commits} commit(s), todas as referências.`];
   if (achados.length === 0) {
     linhas.push('✓ Nenhuma credencial encontrada.');
@@ -239,8 +324,18 @@ function relatorio({ commits, achados }) {
     linhas.push(
       '',
       'O que resolve é TROCAR a credencial: reescrever o histórico não desfaz uma',
-      'exposição que já foi publicada — o valor pode ter sido copiado antes.'
+      'exposição que já foi publicada — o valor pode ter sido copiado antes.',
+      'Se, revisado, não for credencial, registre-o em scripts/excecoes-da-auditoria.js.'
     );
+  }
+  if (aceitos > 0) {
+    linhas.push(`${aceitos} falso(s) positivo(s) já revisado(s), em scripts/excecoes-da-auditoria.js.`);
+  }
+  if (semUso.length > 0) {
+    linhas.push(`Aviso: ${semUso.length} exceção(ões) sem achado correspondente — pode(m) sair da lista:`);
+    for (const e of semUso) {
+      linhas.push(`  ${e.commit.slice(0, 10)}  ${e.linha ? `${e.arquivo}:${e.linha}` : e.arquivo}  ${e.tipo}`);
+    }
   }
   linhas.push(
     '',
@@ -251,7 +346,7 @@ function relatorio({ commits, achados }) {
 }
 
 async function principal() {
-  const resultado = await auditar();
+  const resultado = await auditar({ excecoes: require('./excecoes-da-auditoria') });
   console.log(relatorio(resultado));
   if (resultado.achados.length > 0) process.exitCode = 1;
 }
@@ -263,4 +358,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { auditar, examinarLinha, examinarCaminho, relatorio };
+module.exports = { auditar, examinarLinha, examinarCaminho, relatorio, ExcecaoInvalida };
