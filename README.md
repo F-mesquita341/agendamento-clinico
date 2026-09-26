@@ -20,7 +20,7 @@ de Quixadá.
 
 | Camada | Tecnologia |
 |---|---|
-| Runtime | Node.js 22+ |
+| Runtime | Node.js 24 |
 | HTTP | Express |
 | Banco | PostgreSQL (Neon) |
 | Validação | Zod |
@@ -47,8 +47,8 @@ quebrada em algum lugar.
 
 ## Como rodar
 
-Pré-requisitos: Node.js 22 ou superior e uma conta no [Neon](https://neon.tech)
-(tier gratuito).
+Pré-requisitos: Node.js 24 — a versão da integração contínua e do Render, e a
+única testada — e uma conta no [Neon](https://neon.tech) (tier gratuito).
 
 ```bash
 git clone <url-deste-repositorio>
@@ -180,6 +180,12 @@ lê-los.
   mandar pedidos inválidos para escrever à vontade.
 - **Fora do limite:** as leituras, `/saude` e o webhook do Mercado Pago — que
   reenvia o que recebe 429, e que a assinatura já protege.
+- **Limitação conhecida — leituras públicas.** `/saude`, `/especialidades`,
+  `/profissionais` e a grade de horários consultam o banco sem login e sem
+  limite. Nas rotas protegidas não há esse problema: pedido sem token recebe
+  401 antes de tocar o Firebase ou o banco, e token falso é recusado pela
+  conferência local da assinatura. Limitar as leituras públicas exigiria chavear
+  por IP, o que puniria quem divide o endereço da operadora.
 
 A contagem fica na memória do processo. Com uma instância só, como hoje no
 Render, basta; com várias, cada uma contaria à parte, e o limite precisaria de

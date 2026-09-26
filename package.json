@@ -5,7 +5,7 @@
   "description": "API REST de agendamento e pagamento de consultas clínicas — TCC, UniCatólica de Quixadá",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node src/servidor.js",

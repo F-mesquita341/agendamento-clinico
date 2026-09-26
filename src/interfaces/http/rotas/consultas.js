@@ -111,9 +111,13 @@ function criarRotasDeConsultas({
 
   rotas.use(semCache);
 
-  rotas.use(autenticar, carregarPaciente);
+  // Autenticar vale para todas; carregar o paciente vai em cada rota, DEPOIS
+  // do limitador nas de escrita — como em pacientes.js e dispositivos.js. Com o
+  // limitador depois, o pedido de quem ainda não tem cadastro recebia 404 sem
+  // gastar orçamento, e "pedido recusado também conta" não valia aqui.
+  rotas.use(autenticar);
 
-  rotas.post('/', limitarEscritas, async (req, res, next) => {
+  rotas.post('/', limitarEscritas, carregarPaciente, async (req, res, next) => {
     try {
       const corpo = validar(corpoDoAgendamento, req.body);
       const consulta = await agendar.executar({
@@ -131,7 +135,7 @@ function criarRotasDeConsultas({
     }
   });
 
-  rotas.get('/', async (req, res, next) => {
+  rotas.get('/', carregarPaciente, async (req, res, next) => {
     try {
       const { pagina, limite } = validar(paginacao, req.query);
 
@@ -155,7 +159,7 @@ function criarRotasDeConsultas({
     }
   });
 
-  rotas.get('/:id', async (req, res, next) => {
+  rotas.get('/:id', carregarPaciente, async (req, res, next) => {
     try {
       const { id } = validar(idNaRota, req.params);
 
@@ -173,7 +177,7 @@ function criarRotasDeConsultas({
     }
   });
 
-  rotas.patch('/:id/cancelamento', limitarEscritas, async (req, res, next) => {
+  rotas.patch('/:id/cancelamento', limitarEscritas, carregarPaciente, async (req, res, next) => {
     try {
       const { id } = validar(idNaRota, req.params);
 
@@ -188,7 +192,7 @@ function criarRotasDeConsultas({
     }
   });
 
-  rotas.post('/:id/pagamento', limitarEscritas, async (req, res, next) => {
+  rotas.post('/:id/pagamento', limitarEscritas, carregarPaciente, async (req, res, next) => {
     try {
       const { id } = validar(idNaRota, req.params);
 

@@ -1453,3 +1453,49 @@ exportação deixava uma pasta dentro de `docs/` quando a guarda falhava, e
 limpa agora o que criou. Um disco que não existe em `--saida` dava erro do
 sistema com pilha; agora é recusado com mensagem. E este diário dizia que cada
 teste tinha sido confirmado por um defeito; foi cada mecanismo.
+
+## 26/09/2026 — O relatório de revisão da Etapa 10
+
+Uma revisão estática da etapa, feita à parte, concluiu que a Etapa 10 fecha o
+plano da API — 21 de 21 exigências — sem nenhum achado bloqueante. Cada ponto
+que pedia ação foi conferido no código antes de ser aceito.
+
+**Um estava impreciso.** O relatório dizia que rajadas sem token "batem no
+Firebase e no banco sem freio". Não batem: sem token, a API responde 401 antes
+de qualquer chamada; com token falso, o Firebase confere a assinatura
+localmente, com as chaves em cache, e o banco não é tocado. A superfície aberta
+de verdade é outra — as leituras públicas, que consultam o banco sem login e
+sem limite. Ficou registrada no README como limitação conhecida: limitá-las
+exigiria chavear por IP, o que puniria quem divide o endereço da operadora.
+
+**Os que procediam, corrigidos com teste e defeito reintroduzido:**
+
+- a exportação lia as duas tabelas em consultas separadas. Além de não ser
+  somente leitura, que era o que o relatório apontava, um agendamento que
+  entrasse entre as duas apareceria em `eventos.csv` sem estar em
+  `consultas.csv`. Agora é uma transação só, REPEATABLE READ e READ ONLY: a
+  mesma fotografia para os dois arquivos, e o banco garantindo que nada se
+  escreve;
+- nas rotas de consulta, o paciente era carregado antes do limitador, e o
+  pedido de quem ainda não tinha cadastro saía com 404 sem gastar orçamento —
+  contra o "pedido recusado também conta" do README. Agora é como nas outras
+  rotas;
+- a janela do limitador passou a ser injetável, e há teste de que o paciente
+  volta a escrever quando ela acaba, esperando o que o próprio `Retry-After`
+  manda;
+- o auditor passou a reconhecer o token refinado do GitHub (`github_pat_`),
+  com comprimento mínimo para a simples menção ao prefixo não ser acusada;
+- `*.csv` no `.gitignore`, como segunda proteção além da guarda do script;
+- `POOL_MAXIMO` e as quatro `FIREBASE_WEB_*` no `.env.example`;
+- o README, o `package.json` e a integração contínua falavam de versões
+  diferentes do Node — 22 prometido, 24 testado. Agora é 24 em todos.
+
+Os três últimos ganharam um teste que impede o desalinhamento de voltar: toda
+variável lida pelo código precisa estar no `.env.example` ou numa lista curta
+das que vivem só no terminal, cada uma com o motivo; a versão do Node precisa
+ser a mesma no README, na CI, no Render e no `package.json`; e o Git precisa
+ignorar CSV e `.env` em qualquer pasta.
+
+**Fica para decidir:** se a análise do Capítulo 4 vai cruzar faltas com idade.
+Se for, a exportação passa a levar a faixa etária na data da consulta — nunca
+a data de nascimento.

@@ -24,7 +24,7 @@
  *     hexadecimais no meio);
  *   - URL do PostgreSQL com senha — fora os bancos locais e descartáveis, como
  *     o postgres:postgres@localhost da integração contínua;
- *   - senha do Neon (npg_...) e token do GitHub;
+ *   - senha do Neon (npg_...) e token do GitHub, clássico ou refinado;
  *   - valor atribuído a uma variável secreta (MERCADO_PAGO_*, FIREBASE_PRIVATE_KEY,
  *     SEGREDO_PSEUDONIMIZACAO, DATABASE_URL*). Em arquivo de configuração,
  *     qualquer valor que não seja exemplo. Em código e em texto corrido, só
@@ -69,7 +69,13 @@ const PADROES = [
   },
   { tipo: 'senha do Neon', regex: /\bnpg_[A-Za-z0-9]{12,}\b/ },
   { tipo: 'JSON de conta de serviço', regex: /"type"\s*:\s*"service_account"/ },
-  { tipo: 'token do GitHub', regex: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/ },
+  // Clássico (ghp_, gho_, ghu_, ghs_, ghr_) e de acesso refinado (github_pat_,
+  // com uns 80 caracteres depois do prefixo). O comprimento mínimo faz a mera
+  // menção ao prefixo, numa documentação, passar sem acusação.
+  {
+    tipo: 'token do GitHub',
+    regex: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})\b/,
+  },
 ];
 
 // O host para antes da porta: `localhost:5432` precisa ser reconhecido como

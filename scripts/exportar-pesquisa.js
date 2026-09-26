@@ -38,7 +38,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const config = require('../src/config');
-const { consultar, encerrar } = require('../src/infra/db/pool');
+const { transacao, encerrar } = require('../src/infra/db/pool');
 const {
   COLUNAS_DE_CONSULTAS,
   COLUNAS_DE_EVENTOS,
@@ -125,8 +125,11 @@ function descreverBanco(url) {
  * @param {string} opcoes.saida pasta de destino, fora do repositório
  * @param {string} opcoes.segredo SEGREDO_PSEUDONIMIZACAO
  * @param {string} [opcoes.raiz] raiz do repositório; os testes não a mudam
+ * @param {Function} [opcoes.entreAsLeituras] SÓ PARA OS TESTES: chamada com o
+ *        cliente da transação entre as duas leituras, para provar que elas
+ *        saem do mesmo instante do banco e que a transação não escreve
  */
-async function exportar({ saida, segredo, raiz = RAIZ }) {
+async function exportar({ saida, segredo, raiz = RAIZ, entreAsLeituras }) {
   // Segredo e pasta são conferidos antes de qualquer leitura do banco.
   const pseudonimo = criarPseudonimizador(segredo);
 
@@ -147,8 +150,19 @@ async function exportar({ saida, segredo, raiz = RAIZ }) {
     );
   }
 
-  const { rows: consultas } = await consultar(SQL_CONSULTAS);
-  const { rows: eventos } = await consultar(SQL_EVENTOS);
+  // As duas leituras numa transação só:
+  //   REPEATABLE READ — a fotografia do banco é tirada na primeira consulta e
+  //     vale para a segunda. Lidas em separado, um agendamento que entrasse
+  //     entre elas apareceria em eventos.csv sem estar em consultas.csv.
+  //   READ ONLY — a exportação não tem por que escrever, e o próprio banco
+  //     passa a garantir que não escreve.
+  const { consultas, eventos } = await transacao(async (cliente) => {
+    await cliente.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const { rows: lidasConsultas } = await cliente.query(SQL_CONSULTAS);
+    if (entreAsLeituras) await entreAsLeituras(cliente);
+    const { rows: lidosEventos } = await cliente.query(SQL_EVENTOS);
+    return { consultas: lidasConsultas, eventos: lidosEventos };
+  });
 
   const pacientes = [...consultas, ...eventos].map((l) => l.paciente_id);
   const consultasCitadas = [...consultas, ...eventos].map((l) => l.consulta_id);

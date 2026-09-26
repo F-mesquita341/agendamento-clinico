@@ -56,6 +56,7 @@ describe('o que é acusado', () => {
     ['senha do Neon', 'senha do Neon', `senha: ${'npg_'}AbCdEf123456`, 'x.md'],
     ['JSON de conta de serviço', 'JSON de conta de serviço', `{ "type": "${'service'}_account" }`, 'x.json'],
     ['token do GitHub', 'token do GitHub', `${'ghp_'}${'A1b2C3'.repeat(6)}`, 'x.md'],
+    ['token refinado do GitHub', 'token do GitHub', `${'github'}_pat_${'11AB2CD3E'.repeat(2)}0XYZ_${'aB3'.repeat(20)}`, 'x.md'],
     ['URL do banco com senha no .env', 'URL do PostgreSQL com senha', `DATABASE_URL=${URL_REAL}`, '.env'],
     ['segredo no .env', 'valor em variável secreta', `${'MERCADO_PAGO_SEGREDO_WEBHOOK'}=${SEGREDO_GERADO}`, '.env'],
     ['segredo num YAML', 'valor em variável secreta', `  ${'MERCADO_PAGO_SEGREDO_WEBHOOK'}: ${SEGREDO_GERADO}`, 'x.yaml'],
@@ -100,6 +101,7 @@ describe('o que não é acusado', () => {
     ['tabela do README', '| DATABASE_URL: | string de conexão do Neon |', 'README.md'],
     ['exemplo abreviado no README', 'MERCADO_PAGO_ACCESS_TOKEN=APP_USR-...', 'README.md'],
     ['instrução no README', 'SEGREDO_PSEUDONIMIZACAO=cole-aqui-o-que-o-comando-gerou', 'README.md'],
+    ['menção ao prefixo do token refinado', 'O auditor reconhece também o formato github_pat_ do GitHub.', 'README.md'],
   ])('%s', (_rotulo, linha, arquivo) => {
     expect(examinarLinha(linha, arquivo)).toEqual([]);
   });

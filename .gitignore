@@ -12,3 +12,8 @@ Thumbs.db
 .vscode/
 !.vscode/extensions.json
 docs/resultados/**/*.tmp
+
+# Dado de pesquisa nunca vai para o Git, nem pseudonimizado. A exportação já
+# recusa gravar dentro do repositório; isto é a segunda proteção, para um CSV
+# copiado à mão.
+*.csv

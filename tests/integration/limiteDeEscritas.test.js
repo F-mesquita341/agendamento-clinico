@@ -25,6 +25,8 @@ const LIMITE = 3;
 
 const comoA = { Authorization: `Bearer ${tokenDe('uid-paciente-a', 'paciente.a@example.com')}` };
 const comoB = { Authorization: `Bearer ${tokenDe('uid-paciente-b', 'paciente.b@example.com')}` };
+// Conta autenticada que ainda não fez o cadastro.
+const comoSemCadastro = { Authorization: `Bearer ${tokenDe('uid-sem-cadastro', 'sem.cadastro@example.com')}` };
 
 let servidor;
 
@@ -131,6 +133,47 @@ describe('limite de escritas por paciente', () => {
     }
 
     expect((await pedir()).status).toBe(429);
+  });
+
+  // Recusado por não ter cadastro também conta, como qualquer pedido recusado.
+  // Com o limitador DEPOIS de carregar o paciente, o 404 saía sem gastar
+  // orçamento — era assim nas rotas de consulta.
+  test.each([
+    ['PATCH', '/pacientes/me'],
+    ['POST', '/consultas'],
+    ['PATCH', '/consultas/1/cancelamento'],
+    ['POST', '/consultas/1/pagamento'],
+    ['POST', '/dispositivos'],
+    ['DELETE', '/dispositivos/1'],
+  ])('%s %s: quem ainda não tem cadastro também gasta o orçamento', async (metodo, caminho) => {
+    const pedir = () => request(servidor)[metodo.toLowerCase()](caminho).set(comoSemCadastro).send({});
+
+    for (let i = 1; i <= LIMITE; i += 1) {
+      expect((await pedir()).body.erro?.codigo).toBe('PERFIL_NAO_CADASTRADO');
+    }
+
+    expect((await pedir()).status).toBe(429);
+  });
+
+  test('quando a janela acaba, o paciente volta a escrever', async () => {
+    // Janela curta, só aqui — em produção é de um minuto. Os pedidos são
+    // cadastros sem corpo: a validação os recusa sem ir ao banco, e eles cabem
+    // folgados na janela.
+    const curto = await iniciar({ limiteDeEscritas: 2, janelaDeEscritasMs: 3000 });
+    try {
+      const cadastrar = () => request(curto).post('/pacientes').set(comoSemCadastro).send({});
+      expect((await cadastrar()).status).not.toBe(429);
+      expect((await cadastrar()).status).not.toBe(429);
+      const barrado = await cadastrar();
+      expect(barrado.status).toBe(429);
+
+      // Espera o que o próprio Retry-After mandou esperar.
+      await new Promise((pronto) => setTimeout(pronto, Number(barrado.headers['retry-after']) * 1000 + 200));
+
+      expect((await cadastrar()).status).not.toBe(429);
+    } finally {
+      await fechar(curto);
+    }
   });
 
   test('leitura não é limitada, nem gasta o orçamento', async () => {

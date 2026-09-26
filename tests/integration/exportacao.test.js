@@ -212,6 +212,47 @@ describe('exportação para a pesquisa', () => {
     ]);
   });
 
+  test('os dois arquivos saem do mesmo instante do banco', async () => {
+    // Um evento gravado por outra conexão ENTRE as duas leituras não pode
+    // aparecer: lidas em separado, eventos.csv traria o que consultas.csv não
+    // viu.
+    const { rows } = await consultar('SELECT count(*)::int AS n FROM auditoria');
+    let inserido;
+    try {
+      await exportar({
+        saida: pasta,
+        segredo: SEGREDO,
+        entreAsLeituras: async () => {
+          const r = await consultar(
+            `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
+             VALUES ('paciente', $1, 'paciente.atualizado', 'paciente', $1, '{}') RETURNING id`,
+            [pacientes.a]
+          );
+          inserido = r.rows[0].id;
+        },
+      });
+
+      expect(lerCsv(path.join(pasta, 'eventos.csv')).linhas).toHaveLength(rows[0].n);
+    } finally {
+      if (inserido) await consultar('DELETE FROM auditoria WHERE id = $1', [inserido]);
+    }
+  });
+
+  test('a leitura roda numa transação só leitura, e não pode escrever', async () => {
+    const estado = {};
+
+    await exportar({
+      saida: pasta,
+      segredo: SEGREDO,
+      entreAsLeituras: async (cliente) => {
+        estado.somenteLeitura = (await cliente.query('SHOW transaction_read_only')).rows[0].transaction_read_only;
+        estado.isolamento = (await cliente.query('SHOW transaction_isolation')).rows[0].transaction_isolation;
+      },
+    });
+
+    expect(estado).toEqual({ somenteLeitura: 'on', isolamento: 'repeatable read' });
+  });
+
   test('o mesmo segredo dá os mesmos pseudônimos de uma exportação para outra', async () => {
     await exportar({ saida: path.join(pasta, '1'), segredo: SEGREDO });
     await exportar({ saida: path.join(pasta, '2'), segredo: SEGREDO });

@@ -41,6 +41,8 @@ const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
  * @param {number} [deps.limiteDeEscritas] escritas por paciente por minuto; os
  *        testes passam um valor alto, para não tropeçar num limite que não é o
  *        assunto deles
+ * @param {number} [deps.janelaDeEscritasMs] só para os testes: encurta a janela
+ *        do limite, que em produção é de um minuto
  */
 function criarApp({
   verificarToken = criarVerificadorFirebase(),
@@ -48,6 +50,7 @@ function criarApp({
   segredoDoWebhook = config.MERCADO_PAGO_SEGREDO_WEBHOOK,
   origens = config.origens,
   limiteDeEscritas = config.LIMITE_ESCRITAS_POR_MINUTO,
+  janelaDeEscritasMs,
   pacientes,
   horarios,
   consultas,
@@ -59,7 +62,10 @@ function criarApp({
 
   // Uma instância só, repassada a todos os roteadores: o orçamento é do
   // paciente, somado entre as rotas de escrita.
-  const limitarEscritas = criarLimiteDeEscritas({ limitePorMinuto: limiteDeEscritas });
+  const limitarEscritas = criarLimiteDeEscritas({
+    limitePorMinuto: limiteDeEscritas,
+    ...(janelaDeEscritasMs ? { janelaMs: janelaDeEscritasMs } : {}),
+  });
 
   app.disable('x-powered-by');
   app.use(helmet());

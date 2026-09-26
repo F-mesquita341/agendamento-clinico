@@ -27,15 +27,18 @@
 
 const { rateLimit } = require('express-rate-limit');
 
-const JANELA_MS = 60_000;
+const UM_MINUTO_MS = 60_000;
 
 /**
  * @param {object} opcoes
  * @param {number} opcoes.limitePorMinuto escritas permitidas por paciente, por minuto
+ * @param {number} [opcoes.janelaMs] duração da janela. Em produção é sempre um
+ *        minuto; os testes a encurtam para provar que o paciente volta a
+ *        escrever quando ela acaba, sem esperar um minuto inteiro.
  */
-function criarLimiteDeEscritas({ limitePorMinuto }) {
+function criarLimiteDeEscritas({ limitePorMinuto, janelaMs = UM_MINUTO_MS }) {
   return rateLimit({
-    windowMs: JANELA_MS,
+    windowMs: janelaMs,
     limit: limitePorMinuto,
     keyGenerator: (req) => req.usuario.uid,
     // Cabeçalhos padrão (RateLimit e RateLimit-Policy) e o Retry-After, que a
