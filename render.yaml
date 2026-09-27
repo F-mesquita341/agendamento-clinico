@@ -37,10 +37,11 @@ services:
         value: '15'
       - key: TRANSPORTE_BANCO
         value: tcp
-      # Restringir à origem do aplicativo é trabalho da Etapa 10; o aplicativo
-      # Android não é um navegador e não passa por CORS.
+      # Só a página de prova da Etapa 9 (npm run pagina:token) chama a API por
+      # um navegador. O aplicativo Android e o webhook não passam por CORS. Em
+      # produção, `*` impede a API de subir.
       - key: ORIGENS_PERMITIDAS
-        value: '*'
+        value: 'http://localhost:4000'
 
       # --- Preenchidos no painel, nunca aqui --------------------------------
       # Banco de produção no Neon (agendamento_producao).

@@ -224,6 +224,12 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
     // em silêncio: mudar a antecedência no domínio passaria nos testes de
     // unidade, e a varredura continuaria trazendo só as consultas de 24 h.
     const ate = new Date(agora.getTime() + JANELA_DO_LEMBRETE_MS);
+    // Só entra quem já tem aparelho. Sem ele, a consulta nem é reservada — e
+    // por isso não é consumida: quando o paciente ativar as notificações, a
+    // rodada seguinte a alcança. Foi o que faltou no portão da Etapa 9: a
+    // rotina achou a consulta antes de o aparelho existir, marcou e desistiu,
+    // e o lembrete daquela consulta nunca saiu. O limite de tentativas é o
+    // começo da consulta, que a própria janela já impõe.
     const { rows } = await consultar(
       `SELECT c.id
          FROM consulta c
@@ -232,6 +238,7 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
           AND c.lembrete_enviado_em IS NULL
           AND h.inicio > $1
           AND h.inicio <= $3
+          AND EXISTS (SELECT 1 FROM dispositivo d WHERE d.paciente_id = c.paciente_id)
         ORDER BY h.inicio
         LIMIT $2`,
       [agora, limite, ate]

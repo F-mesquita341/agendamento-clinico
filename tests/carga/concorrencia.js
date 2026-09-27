@@ -71,6 +71,10 @@ const PRAZO_POR_REQUISICAO_MS = 60_000;
 const PRAZO_TOTAL_MS = 15 * 60_000;
 const DIA_MS = 86_400_000;
 const HORA_MS = 3_600_000;
+// Cada paciente faz um pedido por rodada nas fases A e C, uns vinte em poucos
+// minutos. Fica abaixo do limite padrão, mas perto o bastante para que um
+// limite mais baixo no ambiente mudasse o que se mede.
+const LIMITE_QUE_NAO_DISPARA = 1_000_000;
 
 const RAIZ = path.join(__dirname, '..', '..');
 const PASTA_RESULTADOS = path.join(RAIZ, 'docs', 'resultados', 'concorrencia');
@@ -644,6 +648,13 @@ ${anomalias.length ? `\n## Anomalias\n\n${anomalias.join('\n')}\n` : ''}
   verificar a assinatura do JWT fica de fora.
 - Um único horário disputado por rodada — o pior caso de contenção, e não uma
   carga típica de clínica.
+- **Sem o limite de escritas por paciente** (Etapa 10). Ele fica ligado, mas
+  com um valor que não dispara, para que o resultado não dependa de como o
+  limite está configurado. Não é atalho: o limitador barra o pedido antes do
+  caso de uso, então só pode *tirar* pedidos da disputa, nunca criar uma —
+  medir o lock sem ele é o pior caso para o lock. Se disparasse, o pedido
+  barrado receberia 429 no lugar do 409, e o teste deixaria de contar as
+  recusas que existe para contar.
 `;
 }
 
@@ -698,7 +709,13 @@ async function principal() {
   try {
     const preparado = await prepararBanco();
     const medidos = new HorariosMedidos();
-    servidor = criarApp({ verificarToken: verificadorFalso, horarios: medidos }).listen(0);
+    // Limite de escritas que não dispara. Ver "Limitações" no relatório: o
+    // limitador só pode tirar pedidos da disputa, nunca criar uma.
+    servidor = criarApp({
+      verificarToken: verificadorFalso,
+      horarios: medidos,
+      limiteDeEscritas: LIMITE_QUE_NAO_DISPARA,
+    }).listen(0);
     await new Promise((resolve) => servidor.once('listening', resolve));
     const url = `http://127.0.0.1:${servidor.address().port}`;
 

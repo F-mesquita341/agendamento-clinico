@@ -23,16 +23,35 @@ const { consultar, encerrar } = require('../../src/infra/db/pool');
 const { verificadorFalso } = require('./verificadorFalso');
 
 /**
+ * Limite de escritas dos testes que não tratam dele. Vários arquivos usam um
+ * mesmo paciente para dezenas de escritas em poucos segundos; com o limite de
+ * produção, tropeçariam num 429 que não é o assunto deles. Só
+ * tests/integration/limiteDeEscritas.test.js passa um valor baixo.
+ */
+const SEM_LIMITE_NA_PRATICA = 1_000_000;
+
+/**
  * O verificador falso é o padrão: nenhum teste deve depender, por esquecimento,
  * de rede ou credencial do Firebase — a integração contínua não tem nenhuma
  * das duas.
  */
-async function iniciar({ verificarToken = verificadorFalso, relogio, gateway, segredoDoWebhook } = {}) {
+async function iniciar({
+  verificarToken = verificadorFalso,
+  relogio,
+  gateway,
+  segredoDoWebhook,
+  limiteDeEscritas = SEM_LIMITE_NA_PRATICA,
+  janelaDeEscritasMs,
+  origens,
+} = {}) {
   // Porta 0: o sistema operacional escolhe uma livre. Sem `gateway`, o app usa
   // o padrão — sem credencial no ambiente de teste, um gateway "indisponível".
   const servidor = criarApp({
     verificarToken,
     relogio,
+    limiteDeEscritas,
+    ...(janelaDeEscritasMs ? { janelaDeEscritasMs } : {}),
+    ...(origens ? { origens } : {}),
     ...(gateway ? { gateway } : {}),
     ...(segredoDoWebhook ? { segredoDoWebhook } : {}),
   }).listen(0);
@@ -47,13 +66,21 @@ async function iniciar({ verificarToken = verificadorFalso, relogio, gateway, se
   return servidor;
 }
 
-async function parar(servidor) {
+/**
+ * Fecha só o servidor, mantendo o pool do banco. Para quem precisa de um app
+ * novo a cada teste — o limitador guarda a contagem na memória do app.
+ */
+async function fechar(servidor) {
   if (servidor) {
     // close() sozinho espera as conexões keep-alive ociosas expirarem.
     servidor.closeAllConnections?.();
     await new Promise((resolve) => servidor.close(resolve));
   }
+}
+
+async function parar(servidor) {
+  await fechar(servidor);
   await encerrar();
 }
 
-module.exports = { iniciar, parar };
+module.exports = { iniciar, parar, fechar };

@@ -28,6 +28,23 @@ const DIRETO_TESTE = `postgresql://u:s@${HOST}/agendamento_teste?sslmode=verify-
 // Mesmo banco do DIRETO, alcançado pelo outro hostname que o Neon oferece.
 const VIA_POOLER = `postgresql://u:s@ep-exemplo-pooler.sa-east-1.aws.neon.tech/agendamento?sslmode=verify-full`;
 
+const CAMPOS = {
+  FIREBASE_PROJECT_ID: 'projeto-exemplo',
+  FIREBASE_CLIENT_EMAIL: 'conta@projeto-exemplo.iam.gserviceaccount.com',
+  FIREBASE_PRIVATE_KEY: 'chave-de-exemplo-nao-real',
+};
+
+// Desde a Etapa 8, produção também exige o pagamento configurado. Os
+// cenários que testam o Firebase em produção levam estas junto.
+const PAGAMENTO = {
+  MERCADO_PAGO_ACCESS_TOKEN: 'credencial-de-exemplo-nao-real',
+  MERCADO_PAGO_SEGREDO_WEBHOOK: 'segredo-de-exemplo',
+  URL_PUBLICA: 'https://api.exemplo.onrender.com',
+};
+
+// Desde a Etapa 10, também as origens do CORS, explícitas.
+const ORIGENS = { ORIGENS_PERMITIDAS: 'https://app.exemplo.com.br' };
+
 let pastaSemEnv;
 
 beforeAll(() => {
@@ -56,6 +73,8 @@ function carregarConfig(variaveis) {
     'FIREBASE_PROJECT_ID',
     'FIREBASE_CLIENT_EMAIL',
     'FIREBASE_PRIVATE_KEY',
+    'ORIGENS_PERMITIDAS',
+    'LIMITE_ESCRITAS_POR_MINUTO',
   ]) {
     delete ambiente[chave];
   }
@@ -188,20 +207,6 @@ describe('credencial do Firebase', () => {
     return arquivo;
   }
 
-  const CAMPOS = {
-    FIREBASE_PROJECT_ID: 'projeto-exemplo',
-    FIREBASE_CLIENT_EMAIL: 'conta@projeto-exemplo.iam.gserviceaccount.com',
-    FIREBASE_PRIVATE_KEY: 'chave-de-exemplo-nao-real',
-  };
-
-  // Desde a Etapa 8, produção também exige o pagamento configurado. Os
-  // cenários que testam o Firebase em produção levam estas junto.
-  const PAGAMENTO = {
-    MERCADO_PAGO_ACCESS_TOKEN: 'credencial-de-exemplo-nao-real',
-    MERCADO_PAGO_SEGREDO_WEBHOOK: 'segredo-de-exemplo',
-    URL_PUBLICA: 'https://api.exemplo.onrender.com',
-  };
-
   test('em produção, sem credencial nenhuma, a API não sobe', () => {
     const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO });
 
@@ -210,7 +215,13 @@ describe('credencial do Firebase', () => {
   });
 
   test('em produção, com as três variáveis FIREBASE_*, sobe', () => {
-    const r = carregarConfig({ NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS, ...PAGAMENTO });
+    const r = carregarConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: DIRETO,
+      ...CAMPOS,
+      ...PAGAMENTO,
+      ...ORIGENS,
+    });
 
     expect(r.codigo).toBe(0);
   });
@@ -223,6 +234,7 @@ describe('credencial do Firebase', () => {
       DATABASE_URL: DIRETO,
       GOOGLE_APPLICATION_CREDENTIALS: arquivo,
       ...PAGAMENTO,
+      ...ORIGENS,
     });
 
     expect(r.codigo).toBe(0);
@@ -303,6 +315,7 @@ describe('credencial do Firebase', () => {
       DATABASE_URL: DIRETO,
       ...CAMPOS,
       ...PAGAMENTO,
+      ...ORIGENS,
       GOOGLE_APPLICATION_CREDENTIALS: path.join(pastaSemEnv, 'removido-ha-tempos.json'),
     });
 
@@ -311,7 +324,7 @@ describe('credencial do Firebase', () => {
   });
 
   describe('pagamento em produção', () => {
-    const base = { NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS };
+    const base = { NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS, ...ORIGENS };
 
     test('sem nada do Mercado Pago, a API não sobe e diz o que falta', () => {
       const r = carregarConfig(base);
@@ -386,5 +399,80 @@ describe('credencial do Firebase', () => {
 
     expect(r.codigo).toBe(1);
     expect(r.saida).not.toMatch(/segredo-que-nao-pode-aparecer/);
+  });
+});
+
+describe('origens do CORS', () => {
+  const producao = { NODE_ENV: 'production', DATABASE_URL: DIRETO, ...CAMPOS, ...PAGAMENTO };
+  const desenvolvimento = { NODE_ENV: 'development', DATABASE_URL: DIRETO };
+
+  test('em produção, * não sobe', () => {
+    const r = carregarConfig({ ...producao, ORIGENS_PERMITIDAS: '*' });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/ORIGENS_PERMITIDAS não pode ser \*/);
+  });
+
+  test('em produção, sem a variável, também não sobe — o padrão é *', () => {
+    // Esquecer a variável no painel não pode abrir a API a qualquer origem.
+    const r = carregarConfig(producao);
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/ORIGENS_PERMITIDAS não pode ser \*/);
+  });
+
+  test('em produção, uma lista explícita sobe', () => {
+    const r = carregarConfig({
+      ...producao,
+      ORIGENS_PERMITIDAS: 'http://localhost:4000, https://app.exemplo.com.br',
+    });
+
+    expect(r.codigo).toBe(0);
+  });
+
+  test('em desenvolvimento, * continua aceito', () => {
+    expect(carregarConfig({ ...desenvolvimento, ORIGENS_PERMITIDAS: '*' }).codigo).toBe(0);
+  });
+
+  // O navegador manda a origem sem barra, em minúsculas, com esquema. Escrita
+  // de outro jeito, ela nunca coincidiria — e o site ficaria bloqueado sem
+  // nenhuma mensagem que explicasse por quê.
+  test.each([
+    ['com barra no final', 'http://localhost:4000/'],
+    ['sem esquema', 'localhost:4000'],
+    ['com caminho', 'https://app.exemplo.com.br/entrar'],
+    ['em maiúsculas', 'https://App.Exemplo.com.br'],
+    ['* no meio de uma lista', 'https://app.exemplo.com.br,*'],
+  ])('origem %s é recusada na subida, em qualquer ambiente', (_rotulo, valor) => {
+    const r = carregarConfig({ ...desenvolvimento, ORIGENS_PERMITIDAS: valor });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/Fora do formato/);
+  });
+
+  test('lista só com vírgulas é recusada', () => {
+    const r = carregarConfig({ ...desenvolvimento, ORIGENS_PERMITIDAS: ' , ,' });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/lista está vazia/);
+  });
+});
+
+describe('limite de escritas', () => {
+  const base = { NODE_ENV: 'development', DATABASE_URL: DIRETO };
+
+  test('é opcional', () => {
+    expect(carregarConfig(base).codigo).toBe(0);
+  });
+
+  test.each([
+    ['zero', '0'],
+    ['texto', 'muitas'],
+    ['fração', '2.5'],
+  ])('recusa %s na subida', (_rotulo, valor) => {
+    const r = carregarConfig({ ...base, LIMITE_ESCRITAS_POR_MINUTO: valor });
+
+    expect(r.codigo).toBe(1);
+    expect(r.saida).toMatch(/LIMITE_ESCRITAS_POR_MINUTO/);
   });
 });

@@ -59,6 +59,8 @@ function criarRotasDeDispositivos({
   verificarToken,
   pacientes = new RepositorioDePacientesPg(),
   dispositivos = new RepositorioDeDispositivosPg(),
+  // Sem valor padrão: ver o comentário em rotas/consultas.js.
+  limitarEscritas,
 }) {
   const rotas = Router();
   const autenticar = criarAutenticar(verificarToken);
@@ -66,7 +68,7 @@ function criarRotasDeDispositivos({
 
   rotas.use(semCache);
 
-  rotas.post('/', autenticar, carregarPaciente, async (req, res, next) => {
+  rotas.post('/', autenticar, limitarEscritas, carregarPaciente, async (req, res, next) => {
     try {
       const { token, plataforma } = validar(corpoDoRegistro, req.body);
       const { id } = await dispositivos.registrar({ pacienteId: req.paciente.id, token, plataforma });
@@ -79,7 +81,7 @@ function criarRotasDeDispositivos({
     }
   });
 
-  rotas.delete('/:id', autenticar, carregarPaciente, async (req, res, next) => {
+  rotas.delete('/:id', autenticar, limitarEscritas, carregarPaciente, async (req, res, next) => {
     try {
       const { id } = validar(idNaRota, req.params);
       const removido = await dispositivos.revogar(req.paciente.id, id);

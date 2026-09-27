@@ -20,7 +20,7 @@ de Quixadá.
 
 | Camada | Tecnologia |
 |---|---|
-| Runtime | Node.js 22+ |
+| Runtime | Node.js 24 |
 | HTTP | Express |
 | Banco | PostgreSQL (Neon) |
 | Validação | Zod |
@@ -47,8 +47,8 @@ quebrada em algum lugar.
 
 ## Como rodar
 
-Pré-requisitos: Node.js 22 ou superior e uma conta no [Neon](https://neon.tech)
-(tier gratuito).
+Pré-requisitos: Node.js 24 — a versão da integração contínua e do Render, e a
+única testada — e uma conta no [Neon](https://neon.tech) (tier gratuito).
 
 ```bash
 git clone <url-deste-repositorio>
@@ -129,6 +129,8 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run verificar:portao` | Portão da Etapa 8 contra a API publicada: agenda, paga em sandbox e confere a confirmação pelo webhook |
 | `npm run pagina:token` | Página de prova da Etapa 9: registra o navegador como aparelho e recebe o lembrete (ver abaixo) |
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
+| `npm run exportar:pesquisa` | Conjunto de dados da pesquisa, pseudonimizado, numa pasta fora do repositório (ver abaixo) |
+| `npm run auditar:historico` | Procura credenciais em todo o histórico do Git, sem nunca mostrar o valor (ver abaixo) |
 
 ## Convenções da API
 
@@ -156,7 +158,38 @@ interpretar o texto da mensagem.
 | 404 | Não existe — ou pertence a outro paciente, sem distinção |
 | 409 | Conflito de concorrência ou de estado |
 | 422 | Regra de negócio violada |
+| 429 | Escritas demais em pouco tempo — ver abaixo |
 | 500 | Erro interno |
+
+### Limite de escritas
+
+Cada paciente tem até `LIMITE_ESCRITAS_POR_MINUTO` escritas por minuto (30 por
+padrão). Passando disso, a API responde **429** `MUITAS_REQUISICOES`, com a
+ação `tentar_novamente` e o cabeçalho `Retry-After`, em segundos. Toda escrita
+também leva os cabeçalhos `RateLimit` e `RateLimit-Policy`, com quanto resta. Os
+três ficam expostos pelo CORS, para um cliente de navegador também conseguir
+lê-los.
+
+- **A chave é o paciente, não o IP.** Celulares atrás do NAT da operadora
+  dividem o mesmo endereço, e um limite por IP puniria um desconhecido pelo
+  outro.
+- **O orçamento é um só**, somado entre todas as rotas de escrita: cadastro,
+  atualização do perfil, agendamento, cancelamento, pagamento e registro e
+  revogação de aparelho.
+- **Pedido recusado também conta.** Se só os bem-sucedidos contassem, bastaria
+  mandar pedidos inválidos para escrever à vontade.
+- **Fora do limite:** as leituras, `/saude` e o webhook do Mercado Pago — que
+  reenvia o que recebe 429, e que a assinatura já protege.
+- **Limitação conhecida — leituras públicas.** `/saude`, `/especialidades`,
+  `/profissionais` e a grade de horários consultam o banco sem login e sem
+  limite. Nas rotas protegidas não há esse problema: pedido sem token recebe
+  401 antes de tocar o Firebase ou o banco, e token falso é recusado pela
+  conferência local da assinatura. Limitar as leituras públicas exigiria chavear
+  por IP, o que puniria quem divide o endereço da operadora.
+
+A contagem fica na memória do processo. Com uma instância só, como hoje no
+Render, basta; com várias, cada uma contaria à parte, e o limite precisaria de
+um armazenamento compartilhado.
 
 ## Controle de concorrência
 
@@ -323,6 +356,11 @@ Tokens que o provedor diz não existirem mais — aplicativo desinstalado — s�
 apagados. Falha momentânea não apaga nada: um token bom apagado por engano
 deixaria a pessoa sem lembrete para sempre, em silêncio.
 
+**Quem ainda não tem aparelho não perde o lembrete.** A rotina só considera
+consultas de pacientes com aparelho registrado. Quem agenda e só ativa as
+notificações depois — mesmo já dentro das 24 horas — é lembrado na rodada
+seguinte ao registro.
+
 **Limitação do plano gratuito:** a rotina só roda com a API acordada, e no
 Render ela hiberna depois de 15 minutos. Um lembrete pode sair atrasado, ou não
 sair. As sessões com participantes devem começar acordando o serviço.
@@ -342,7 +380,18 @@ npm run pagina:token
 ```
 
 Abra `http://localhost:4000` no Chrome ou no Edge, em janela **normal** — janela
-anônima e o Brave bloqueiam as notificações do Firebase.
+anônima e o Brave bloqueiam as notificações do Firebase. Pelo endereço
+`localhost`, e não `127.0.0.1`: a API publicada só aceita essa origem no
+navegador (ver CORS em [Publicação](#publicação)).
+
+**Registre o navegador ANTES de agendar.** A página não faz nada sozinha: é
+preciso entrar e clicar em "Ativar notificações". Depois, com a página aberta
+(ela mantém a API acordada), agende e pague pelo `verificar:portao`; o lembrete
+chega em até 15 minutos.
+
+O portão da Etapa 9 foi atingido assim em 22/09/2026, contra a API publicada:
+o lembrete chegou uma vez, e nenhuma rodada seguinte o repetiu. O aparelho
+Android real fica para quando o aplicativo existir.
 
 ## Publicação
 
@@ -356,6 +405,16 @@ este repositório. O painel pede as seis variáveis marcadas `sync: false`:
 `DATABASE_URL`, as três `FIREBASE_*` e as duas `MERCADO_PAGO_*`. As migrations
 rodam antes de a porta abrir (`npm run migrate && npm start`), porque uma
 publicação com migration pendente não pode subir pela metade.
+
+**CORS.** Em produção, `ORIGENS_PERMITIDAS` não pode ser `*`: a API se recusa a
+subir. O `render.yaml` libera só `http://localhost:4000`, a página de prova — é
+o único cliente de navegador que existe. O aplicativo Android e o webhook do
+Mercado Pago não são navegadores e não passam por CORS; os pedidos deles não
+levam o cabeçalho `Origin` e são atendidos como sempre. Cada origem se escreve
+como o navegador a envia — esquema, host e porta, sem barra no final —, e
+qualquer outra forma também impede a subida, em vez de bloquear o site sem
+explicação. Com o token no cabeçalho, e não em cookie, `*` não entregaria a
+sessão de ninguém a outro site; restringir é defesa em profundidade.
 
 **O webhook precisa ser configurado na aplicação DONA da credencial.** Um
 Access Token do Mercado Pago tem a forma
@@ -425,6 +484,10 @@ exatamente o código medido.
 horário. **Recusa** é o `409` de quem perdeu a disputa: 99 por rodada é o
 resultado correto. O HTTP chama o 409 de *Conflict*, mas recusa não é conflito.
 
+O teste roda com o [limite de escritas](#limite-de-escritas) num valor que não
+dispara. O limitador barra o pedido antes do caso de uso, então só pode tirar
+pedidos da disputa, nunca criar uma: medir sem ele é o pior caso para o lock.
+
 ## Autenticação
 
 A identidade é do Firebase Authentication. O aplicativo faz login no Firebase e
@@ -490,6 +553,88 @@ npm run verificar:token
 ```
 
 O script não imprime token, senha nem chave.
+
+## Exportação para a pesquisa
+
+A proposta promete que os dados coletados serão pseudonimizados (Seção 4.6) e
+descartados ao fim da pesquisa (4.7). A exportação é o que entrega esse
+conjunto: tira do banco só o que a análise precisa, com paciente e consulta
+trocados por pseudônimos.
+
+```powershell
+npm run exportar:pesquisa -- --saida C:\pesquisa\exportacao-2026-10
+```
+
+O banco é o de `DATABASE_URL`; para exportar o de produção, defina-a no
+terminal antes. O script mostra host e nome do banco, nunca usuário nem senha.
+
+**O segredo.** O pseudônimo é um HMAC-SHA256 do id com
+`SEGREDO_PSEUDONIMIZACAO` — a "informação adicional mantida separadamente" da
+LGPD, Art. 13. Gere-o no **seu** terminal e guarde-o como uma senha: no `.env`,
+que não vai para o Git, ou fora do repositório.
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+O mesmo segredo dá os mesmos pseudônimos de uma exportação para outra. Sem
+segredo, ou com menos de 32 caracteres, a exportação não roda.
+
+| Arquivo | Colunas |
+|---|---|
+| `consultas.csv` | `consulta`, `paciente`, `status`, `motivo_cancelamento`, `inicio`, `criada_em`, `paga` (1 se houve pagamento aprovado), `lembrete_enviado_em` |
+| `eventos.csv` | `paciente`, `consulta`, `ator` (paciente, sistema ou webhook), `acao`, `instante` — toda a auditoria, sem o campo `detalhe` |
+
+Instantes em UTC, ISO 8601. **Não saem:** nome, e-mail, telefone, data de
+nascimento, uid do Firebase, token de aparelho, profissional, especialidade
+(dado sensível, LGPD Art. 11), valor e identificadores do Mercado Pago. As
+colunas são uma lista fechada no código: uma coluna nova no banco só entra na
+exportação se alguém a acrescentar ali.
+
+**Guardas.** A exportação recusa gravar dentro do repositório, que é público;
+nunca sobrescreve uma exportação anterior; e confere que dois ids não deram o
+mesmo pseudônimo.
+
+**Pseudonimizado não é anônimo.** Os instantes são exatos, então, enquanto o
+banco existir, uma linha exportada pode ser casada com a linha dele mesmo sem o
+segredo. Até o fim da pesquisa, o conjunto continua sendo dado pessoal e deve
+ser tratado como tal. O descarte da Seção 4.7 — do segredo **e** do banco — é o
+que desfaz a associação de vez.
+
+## Credenciais fora do histórico
+
+O repositório é público, e credencial que entra num commit continua no
+histórico mesmo depois de apagada. Para conferir:
+
+```bash
+npm run auditar:historico
+```
+
+O script lê cada linha acrescentada em cada commit, de todas as referências, e
+o nome de cada arquivo que já existiu. Procura `.env` versionado, arquivo de
+chave, JSON de conta de serviço, bloco de chave privada, token do Mercado Pago,
+URL do PostgreSQL com senha, senha do Neon, token do GitHub e valor atribuído a
+variável secreta. Relata commit, arquivo, linha e tipo — **nunca o valor** — e
+sai com erro se achar algo. Roda na integração contínua a cada envio.
+
+Não acusa a configuração do app Web do Firebase (`apiKey`, `appId`, VAPID), que
+é pública por natureza, nem o banco descartável da integração contínua ou os
+valores falsos que os testes usam de propósito. Em código e em texto corrido
+(`.md`, `.txt`), variável secreta só é acusada quando o valor tem forma de
+segredo gerado: numa frase como "o `MERCADO_PAGO_ACCESS_TOKEN`: a credencial da
+conta de teste", o "valor" é uma palavra. Uma credencial de verdade colada num
+texto continua acusada pela própria estrutura.
+
+Se acusar algo, o que resolve é **trocar a credencial**. Reescrever o histórico
+não desfaz uma exposição que já foi publicada: o valor pode ter sido copiado
+antes.
+
+Se, revisado, o achado não for credencial, ele vai para
+[`scripts/excecoes-da-auditoria.js`](scripts/excecoes-da-auditoria.js) com
+commit, arquivo, linha, tipo e o motivo. Sem essa saída, um falso positivo
+deixaria a integração contínua vermelha para sempre, porque o histórico não
+muda. A exceção precisa coincidir em tudo com o achado, e credencial de verdade
+nunca entra ali.
 
 ## Licença
 

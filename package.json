@@ -5,7 +5,7 @@
   "description": "API REST de agendamento e pagamento de consultas clínicas — TCC, UniCatólica de Quixadá",
   "license": "MIT",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node src/servidor.js",
@@ -21,6 +21,8 @@
     "verificar:sandbox": "node scripts/verificar-sandbox-mp.js",
     "verificar:portao": "node scripts/verificar-portao-pagamento.js",
     "pagina:token": "node scripts/servir-pagina-de-token.js",
+    "exportar:pesquisa": "node scripts/exportar-pesquisa.js",
+    "auditar:historico": "node scripts/auditar-historico.js",
     "carga": "node tests/carga/concorrencia.js"
   },
   "dependencies": {
@@ -28,6 +30,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.7.0",
     "firebase-admin": "^14.4.0",
     "helmet": "^8.0.0",
     "node-pg-migrate": "^9.0.0",

@@ -34,12 +34,22 @@ jobs:
       DATABASE_URL_TESTE: postgres://postgres:postgres@localhost:5432/agendamento_teste
 
     steps:
+      # Histórico completo, e não só o último commit: a auditoria abaixo lê
+      # todos.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
+
+      # O repositório é público: credencial que entra num commit fica no
+      # histórico mesmo depois de apagada. Conferido a cada envio, antes de
+      # tudo. O relatório diz commit, arquivo e tipo — nunca o valor.
+      - name: Auditar o histórico do Git
+        run: npm run auditar:historico
 
       - name: Instalar dependências
         run: npm ci

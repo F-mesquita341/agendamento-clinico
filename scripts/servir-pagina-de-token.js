@@ -25,6 +25,11 @@
  * O id do projeto vem de FIREBASE_PROJECT_ID ou, na falta, do arquivo de
  * credencial apontado por GOOGLE_APPLICATION_CREDENTIALS — só o campo
  * `project_id`, nada mais é lido dele.
+ *
+ * A API publicada só atende, pelo navegador, a origem http://localhost:4000
+ * (ORIGENS_PERMITIDAS no render.yaml). Abra a página por `localhost`, e não
+ * por 127.0.0.1, que é outra origem; e, mudando a porta com PORTA_PAGINA,
+ * acrescente a nova origem lá.
  */
 
 require('dotenv').config({ quiet: true });

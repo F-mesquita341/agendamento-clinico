@@ -1310,3 +1310,192 @@ divergência futura — algo que um teste só enxergaria mudando a constante.
 Ambiente: a rede de onde trabalhei hoje bloqueia a porta 5432, e o Neon ficou
 inalcançável por TCP. A suíte rodou por WebSocket (`TRANSPORTE_BANCO=websocket`),
 que o projeto já previa desde a Etapa 1 exatamente para isso.
+
+## 22/09/2026 — Portão da Etapa 9, e o que a primeira tentativa ensinou
+
+O lembrete chegou, contra a API publicada e o Firebase de verdade: "Você tem uma
+consulta amanhã às 08:30", numa página aberta no Chrome — sem especialidade, sem
+profissional. No banco de produção, uma linha `lembrete.enviado` para a
+consulta 6, com `{"aparelhos":1}`; vinte e cinco minutos depois, com o serviço
+mantido acordado, continuava uma só. Portão atingido. O aparelho Android real
+fica para a Fase 4.
+
+Uma ressalva sobre o que prova o quê: uma rodada que não tem nada a fazer não
+deixa rastro, então a produção mostra "passaram mais de 15 minutos acordado e
+não houve reenvio". Quem prova o mecanismo é o teste "a segunda rodada NÃO
+reenvia". O teste diz que funciona; a produção diz que funciona lá.
+
+**A primeira tentativa falhou, e do jeito que o desenho previa.** A página foi
+aberta, mas o navegador não chegou a ser registrado. A consulta 5 foi agendada
+e paga, a rotina passou às 23:00, não achou aparelho e marcou a consulta como
+tratada — a regra "sem aparelho, marca e desiste", pensada para não varrer a
+mesma consulta para sempre. Registrado o aparelho, a consulta 5 já estava
+consumida.
+
+Nenhuma linha `lembrete.enviado` foi gravada para ela, o que confirma que a
+auditoria registra só envio que aconteceu. Mas a regra estava errada para quem
+importa: um paciente que agenda e só ativa as notificações dentro das 24 horas
+nunca seria lembrado. O "para sempre" que a justificava era, na verdade,
+limitado pelo começo da consulta.
+
+Corrigido na Etapa 10, antes do endurecimento: a varredura só traz consultas de
+pacientes que têm aparelho (`EXISTS`), e quem não tem nem é reservado. Se o
+aparelho some entre a varredura e o envio — corrida rara —, a marca é desfeita
+pela mesma regra. O incidente da consulta 5 virou teste: aparelho registrado
+depois da primeira rodada recebe na rodada seguinte. Dois defeitos
+reintroduzidos, um de cada mecanismo, cada um derrubando o seu teste — e um
+terceiro que não valeu: o `sed` apagou a ocorrência errada de
+`desmarcarLembrete`, e os testes passaram porque o defeito não estava onde eu
+achava. Refeito no lugar certo, caiu.
+
+## 23/09/2026 — Etapa 10: endurecimento
+
+Os quatro itens que o relatório de revisão de 22/09 deixou para fechar a API,
+cada um num commit, cada mecanismo confirmado por um defeito reintroduzido de
+propósito — dezoito nas quatro partes, e mais dois no fechamento da Etapa 9.
+
+**Limite de escritas (E10.1).** Trinta escritas por minuto, por paciente — não
+por IP: celulares atrás do NAT da operadora dividem endereço, e o teste de carga
+dispara cem pacientes do mesmo IP. Uma instância só do limitador, repassada aos
+roteadores, para o orçamento ser do paciente e não de cada grupo de rotas.
+Pedido recusado também conta, senão bastaria mandar lixo. Webhook e leituras
+ficam de fora. O teste de carga roda com um limite que não dispara, e o
+relatório diz por quê: o limitador só tira pedidos da disputa, então medir sem
+ele é o pior caso para o lock. Uma correção no meu próprio texto: eu tinha
+escrito que, com o limite ligado, parte das respostas viria como 429. As contas
+mostraram que não — cada paciente faz uns vinte pedidos por minuto no teste,
+abaixo dos trinta. O relatório passou a dizer o que é verdade: o valor alto é
+para o resultado não depender de como o limite está configurado. Defeitos
+reintroduzidos: chave por IP, rota sem limitador, uma instância por roteador,
+só as bem-sucedidas contando, limitador antes da autenticação — cada um
+derrubou o seu teste.
+
+**CORS (E10.2).** Em produção, `*` impede a subida, inclusive quando a variável
+falta, porque o padrão é `*`. Origem fora da forma que o navegador envia —
+barra no final, maiúsculas, com caminho — também impede, em qualquer ambiente:
+de outro jeito o site listado seria bloqueado sem explicação. O `render.yaml`
+libera só `http://localhost:4000`, a página de prova. A justificativa ficou
+honesta: com token no cabeçalho, e não em cookie, `*` não entregaria a sessão
+de ninguém; restringir é defesa em profundidade.
+
+**Exportação pseudonimizada (E10.3).** HMAC-SHA256 do id com um segredo que só
+o pesquisador tem — um hash simples seria desfeito calculando o de 1, 2, 3.
+Colunas numa lista fechada; a especialidade fica de fora por ser dado de saúde.
+A exportação recusa gravar dentro do repositório, que é público. O README
+registra o limite do que isso garante: pseudonimizado não é anônimo — com
+instantes exatos, uma linha exportada pode ser casada com o banco mesmo sem o
+segredo. A associação só se desfaz de vez com o descarte do segredo e do banco,
+que é o que a Seção 4.7 promete.
+
+**Histórico do Git (E10.4).** O auditor relata commit, arquivo, linha e tipo,
+nunca o valor. A primeira rodada acusou uma coisa: a URL do banco da integração
+contínua. Falso positivo meu — a regex pegava `localhost:5432` inteiro, e a
+exceção de `localhost` não casava. Corrigido, os 69 commits saíram limpos, e o
+commit do próprio auditor também: os segredos dos testes dele são montados em
+pedaços, senão o arquivo se acusaria. Um valor pediu cuidado antes de fechar a
+regra: num teste, `MERCADO_PAGO_ACCESS_TOKEN` recebe um texto de 53 caracteres
+que começa com `APP_USR-`. Conferido pela forma mascarada, sem ver o valor: o
+meio são palavras, e não os 32 dígitos hexadecimais de uma credencial. A regra
+ficou assim: em código, só a estrutura acusa. A auditoria passou a rodar na
+integração contínua, com o histórico completo.
+
+**Portão da Etapa 10: atingido.** Clone limpo numa pasta temporária, README ao
+pé da letra: `npm install`, `.env` a partir do modelo, as duas migrations, o
+seed, `npm run dev` e a rota de saúde respondendo `{"status":"ok"}`, e
+`npm test` com 583 testes passando. O único desvio foi inevitável: os bancos
+não foram criados de novo; as duas URLs vieram do `.env` de trabalho, copiadas
+por script, sem passar pela tela. Anotado no caminho:
+
+- nesta rede a porta 5432 é bloqueada, e o README já cobre isso
+  (`TRANSPORTE_BANCO=websocket`);
+- o npm atual avisa que bloqueou scripts de pós-instalação de `@firebase/util`
+  e `protobufjs`. Nada deixou de funcionar, e a suíte passou;
+- sem credencial do Firebase, a API sobe e diz claramente o que fica
+  desligado, como deveria;
+- a suíte de desligamento depende de sinais do Linux: pula no Windows e roda
+  na integração contínua.
+
+## 24/09/2026 — Revisão minuciosa da Etapa 10
+
+Antes do push, a branch inteira relida, e o que a leitura não garante,
+verificado de verdade: o limitador com os cabeçalhos de proxy que o Render
+manda (nenhum aviso da biblioteca); a exportação sobre o banco de
+desenvolvimento, só lendo, com nenhum dos 22 dados pessoais conferidos nos
+arquivos; o relatório de carga montado com os dados reais de 19/09, porque o
+modo ensaio da integração contínua nunca monta esse texto. Oito achados, todos
+corrigidos, cada um com teste e com o defeito reintroduzido derrubando-o.
+
+**O mais sério era do auditor.** Ele acusava frase de documentação como
+segredo: "o `MERCADO_PAGO_ACCESS_TOKEN`: a credencial da conta de teste" dava
+"valor em variável secreta". Rodando na integração contínua sobre o histórico
+inteiro, uma frase dessas no diário a deixaria vermelha para sempre — o
+histórico não muda, e não havia como registrar um falso positivo revisado.
+Agora, em texto corrido, variável secreta só é acusada com valor em forma de
+segredo gerado, como em código; uma credencial de verdade colada num texto
+continua acusada pela estrutura. E há a saída que faltava:
+`scripts/excecoes-da-auditoria.js`, onde cada falso positivo revisado entra com
+commit, arquivo, linha, tipo e motivo, e só vale se coincidir em tudo.
+
+Também do auditor: num arquivo renomeado, o achado pelo nome antigo saía com o
+nome novo — `.env` renomeado para `config.txt` virava "config.txt é um .env".
+
+**Dos lembretes.** O contrato do domínio não dizia que a varredura só traz quem
+tem aparelho, e o dublê não seguia essa regra; os dois agora seguem, com um
+teste de unidade que o prova sem banco. E o contador "sem aparelho" da rotina
+misturava dois desfechos opostos: o aparelho que sumiu no meio — a consulta
+volta à fila — e todos os aparelhos recusados pelo provedor — o lembrete não sai
+mais. O log dizia "sem aparelho registrado" para os dois. Agora são
+`semAparelho` e `aparelhosInvalidos`, e o log diz qual volta e qual não.
+
+**Menores.** O CORS passou a expor `Retry-After` e `RateLimit` ao navegador —
+antes, só o aplicativo Android conseguia lê-los. O teste da guarda da
+exportação deixava uma pasta dentro de `docs/` quando a guarda falhava, e
+limpa agora o que criou. Um disco que não existe em `--saida` dava erro do
+sistema com pilha; agora é recusado com mensagem. E este diário dizia que cada
+teste tinha sido confirmado por um defeito; foi cada mecanismo.
+
+## 26/09/2026 — O relatório de revisão da Etapa 10
+
+Uma revisão estática da etapa, feita à parte, concluiu que a Etapa 10 fecha o
+plano da API — 21 de 21 exigências — sem nenhum achado bloqueante. Cada ponto
+que pedia ação foi conferido no código antes de ser aceito.
+
+**Um estava impreciso.** O relatório dizia que rajadas sem token "batem no
+Firebase e no banco sem freio". Não batem: sem token, a API responde 401 antes
+de qualquer chamada; com token falso, o Firebase confere a assinatura
+localmente, com as chaves em cache, e o banco não é tocado. A superfície aberta
+de verdade é outra — as leituras públicas, que consultam o banco sem login e
+sem limite. Ficou registrada no README como limitação conhecida: limitá-las
+exigiria chavear por IP, o que puniria quem divide o endereço da operadora.
+
+**Os que procediam, corrigidos com teste e defeito reintroduzido:**
+
+- a exportação lia as duas tabelas em consultas separadas. Além de não ser
+  somente leitura, que era o que o relatório apontava, um agendamento que
+  entrasse entre as duas apareceria em `eventos.csv` sem estar em
+  `consultas.csv`. Agora é uma transação só, REPEATABLE READ e READ ONLY: a
+  mesma fotografia para os dois arquivos, e o banco garantindo que nada se
+  escreve;
+- nas rotas de consulta, o paciente era carregado antes do limitador, e o
+  pedido de quem ainda não tinha cadastro saía com 404 sem gastar orçamento —
+  contra o "pedido recusado também conta" do README. Agora é como nas outras
+  rotas;
+- a janela do limitador passou a ser injetável, e há teste de que o paciente
+  volta a escrever quando ela acaba, esperando o que o próprio `Retry-After`
+  manda;
+- o auditor passou a reconhecer o token refinado do GitHub (`github_pat_`),
+  com comprimento mínimo para a simples menção ao prefixo não ser acusada;
+- `*.csv` no `.gitignore`, como segunda proteção além da guarda do script;
+- `POOL_MAXIMO` e as quatro `FIREBASE_WEB_*` no `.env.example`;
+- o README, o `package.json` e a integração contínua falavam de versões
+  diferentes do Node — 22 prometido, 24 testado. Agora é 24 em todos.
+
+Os três últimos ganharam um teste que impede o desalinhamento de voltar: toda
+variável lida pelo código precisa estar no `.env.example` ou numa lista curta
+das que vivem só no terminal, cada uma com o motivo; a versão do Node precisa
+ser a mesma no README, na CI, no Render e no `package.json`; e o Git precisa
+ignorar CSV e `.env` em qualquer pasta.
+
+**Fica para decidir:** se a análise do Capítulo 4 vai cruzar faltas com idade.
+Se for, a exportação passa a levar a faixa etária na data da consulta — nunca
+a data de nascimento.
