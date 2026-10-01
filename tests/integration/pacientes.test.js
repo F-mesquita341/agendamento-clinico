@@ -316,3 +316,24 @@ describe('adaptador de pacientes', () => {
     expect(rows[0].n).toBe(0);
   });
 });
+
+describe('GET /consentimento/termo-vigente', () => {
+  test('informa a versão vigente, sem login e sem cache', async () => {
+    const r = await request(servidor).get('/consentimento/termo-vigente');
+
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ termo: { versao: VERSAO_TERMO_CONSENTIMENTO } });
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+
+  test('a versão que a rota informa é a que o cadastro aceita', async () => {
+    // É o caminho do aplicativo: lê a versão aqui e a devolve no aceite. Se a
+    // rota e o domínio divergissem, todo cadastro feito pelo caminho certo
+    // seria recusado.
+    const { versao } = (await request(servidor).get('/consentimento/termo-vigente')).body.termo;
+
+    const r = await cadastrar(comoA, { nome: 'Pessoa de Teste', consentimento: { aceito: true, versao } });
+
+    expect(r.status).toBe(201);
+  });
+});

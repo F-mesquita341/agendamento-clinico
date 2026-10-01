@@ -22,6 +22,7 @@ const config = require('../../config');
 const saude = require('./rotas/saude');
 const especialidades = require('./rotas/especialidades');
 const profissionais = require('./rotas/profissionais');
+const consentimento = require('./rotas/consentimento');
 const { criarRotasDePacientes } = require('./rotas/pacientes');
 const { criarRotasDeConsultas } = require('./rotas/consultas');
 const { criarRotasDeWebhook } = require('./rotas/webhooks');
@@ -83,6 +84,7 @@ function criarApp({
   app.use(saude);
   app.use('/especialidades', especialidades);
   app.use('/profissionais', profissionais);
+  app.use('/consentimento', consentimento);
   app.use('/pacientes', criarRotasDePacientes({ verificarToken, pacientes, relogio, limitarEscritas }));
   // `horarios` e `consultas` só são informados pelo teste de carga, que mede
   // quantas recusas foram decididas pelo lock; ausentes, a rota usa os

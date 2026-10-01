@@ -18,7 +18,7 @@ class CancelarConsulta {
   async executar({ pacienteId, consultaId }) {
     const consulta = await this.consultas.porId(consultaId);
     if (!consulta) {
-      throw new NaoEncontrado('Consulta');
+      throw new NaoEncontrado('Consulta', { feminino: true });
     }
 
     // Lança AcessoNegado se for de outro paciente, ou RegraDeNegocio se o

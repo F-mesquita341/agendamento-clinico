@@ -32,6 +32,12 @@ describe('erros do domínio', () => {
     expect(new NaoEncontrado('Profissional').status).toBe(404);
   });
 
+  test('NaoEncontrado concorda no feminino quando o recurso pede', () => {
+    expect(new NaoEncontrado('Consulta', { feminino: true }).message).toBe('Consulta não encontrada.');
+    // O padrão continua masculino: "Horário", "Paciente", "Aparelho".
+    expect(new NaoEncontrado('Horário').message).toBe('Horário não encontrado.');
+  });
+
   test('falta de token é 401 e acesso a recurso alheio é 403', () => {
     expect(new NaoAutenticado().status).toBe(401);
     expect(new AcessoNegado().status).toBe(403);

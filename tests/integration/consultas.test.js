@@ -470,3 +470,35 @@ describe('PATCH /consultas/:id/cancelamento', () => {
     expect(rows.map((l) => l.acao)).toEqual(['consulta.criada', 'consulta.cancelada']);
   });
 });
+
+describe('consulta não encontrada', () => {
+  // A mensagem vai para a tela do aplicativo e para os prints da monografia:
+  // no feminino, em cada um dos caminhos que a produzem.
+  const MENSAGEM = 'Consulta não encontrada.';
+
+  test.each([
+    ['na leitura', () => request(servidor).get('/consultas/999999').set(comoA)],
+    ['no cancelamento', () => cancelar(comoA, 999999)],
+    ['no pagamento', () => request(servidor).post('/consultas/999999/pagamento').set(comoA)],
+  ])('inexistente, %s', async (_rotulo, pedir) => {
+    const r = await pedir();
+
+    expect(r.status).toBe(404);
+    expect(r.body.erro.mensagem).toBe(MENSAGEM);
+  });
+
+  test('de outro paciente, com a mesma mensagem da inexistente', async () => {
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+
+    const r = await request(servidor).get(`/consultas/${consulta.id}`).set(comoB);
+
+    expect(r.body.erro.mensagem).toBe(MENSAGEM);
+  });
+
+  test('no adaptador, quando a consulta some antes da trava', async () => {
+    await expect(consultasPg.cancelar(999999)).rejects.toMatchObject({
+      codigo: 'NAO_ENCONTRADO',
+      message: MENSAGEM,
+    });
+  });
+});

@@ -1499,3 +1499,34 @@ ignorar CSV e `.env` em qualquer pasta.
 **Fica para decidir:** se a análise do Capítulo 4 vai cruzar faltas com idade.
 Se for, a exportação passa a levar a faixa etária na data da consulta — nunca
 a data de nascimento.
+
+## 30/09/2026 — Revisão final e três ajustes de contrato antes do front-end
+
+A quarta revisão, sobre a `main` em 925895a, deu o veredito: a API pode ser
+congelada e o front-end pode começar. Ela pediu três ajustes que tocam o
+contrato, a fazer antes da primeira tela do Flutter. Conferidos no código e
+feitos.
+
+**A versão do termo de consentimento agora é informada pela API**, em
+`GET /consentimento/termo-vigente`. Estava fixa no domínio e em lugar nenhum do
+contrato: o aplicativo teria de embuti-la, e a troca do termo — que vai
+acontecer depois do parecer do Comitê de Ética — quebraria o cadastro em todo
+aplicativo instalado. Um cuidado ficou escrito no README e na própria rota: a
+versão sozinha não basta. O aceite precisa ser do texto que a pessoa leu; se a
+versão vigente não for a do texto que o aplicativo tem, ele pede atualização em
+vez de enviar o aceite de um texto que não mostrou. Um teste lê a versão pela
+rota e cadastra com ela — se rota e domínio divergissem, todo cadastro feito
+pelo caminho certo seria recusado.
+
+**Cache das leituras públicas.** A grade de horários não dizia nada sobre
+cache; agora é `no-store`, inclusive nas respostas de erro — uma grade velha
+mostraria como livre um horário que outra pessoa acabou de reservar. O lock
+otimista protegeria a integridade com um 409, mas o paciente não deveria nem
+ver o horário. A lista e o detalhe de profissionais ficam 5 minutos em cache:
+mudam pouco, mas não tão pouco quanto as especialidades.
+
+**"Consulta não encontrada."** A mensagem saía "Consulta não encontrado." — a
+frase vai para a tela e para os prints desta monografia. O gênero passou a ser
+dito por quem lança o erro; adivinhá-lo pela terminação erraria em "Paciente".
+São cinco lugares que produzem a mensagem, e cada um ganhou o seu teste: tirar
+o feminino de qualquer um derruba exatamente o teste dele.
