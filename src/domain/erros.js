@@ -36,8 +36,17 @@ class HorarioIndisponivel extends ErroDeDominio {
 }
 
 class NaoEncontrado extends ErroDeDominio {
-  constructor(oQue = 'Recurso') {
-    super('NAO_ENCONTRADO', `${oQue} não encontrado.`, { status: 404 });
+  /**
+   * A mensagem vai para a tela do aplicativo, então concorda com o recurso:
+   * "Consulta não encontrada.", "Horário não encontrado.". O gênero é dito por
+   * quem lança — adivinhá-lo pela terminação da palavra erraria em "Paciente"
+   * e em qualquer substantivo que ainda não existe.
+   *
+   * @param {string} [oQue] o recurso, com inicial maiúscula
+   * @param {{feminino?: boolean}} [opcoes]
+   */
+  constructor(oQue = 'Recurso', { feminino = false } = {}) {
+    super('NAO_ENCONTRADO', `${oQue} não ${feminino ? 'encontrada' : 'encontrado'}.`, { status: 404 });
   }
 }
 

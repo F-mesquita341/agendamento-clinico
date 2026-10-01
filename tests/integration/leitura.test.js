@@ -368,3 +368,31 @@ describe('erros do analisador de corpo', () => {
     }
   });
 });
+
+describe('cache das leituras públicas', () => {
+  test.each([
+    ['a lista de profissionais', () => '/profissionais'],
+    ['o profissional', () => `/profissionais/${dados.profissionais.jose}`],
+  ])('%s pode ficar alguns minutos em cache', async (_rotulo, caminho) => {
+    const r = await request(servidor).get(caminho());
+
+    expect(r.status).toBe(200);
+    expect(r.headers['cache-control']).toBe('public, max-age=300');
+  });
+
+  test('a grade de horários nunca fica em cache', async () => {
+    // Uma grade velha mostraria como livre o horário que outra pessoa acabou
+    // de reservar.
+    const r = await request(servidor).get(`/profissionais/${dados.profissionais.jose}/horarios`);
+
+    expect(r.status).toBe(200);
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+
+  test('nem a resposta de erro da grade', async () => {
+    const r = await request(servidor).get('/profissionais/999999/horarios');
+
+    expect(r.status).toBe(404);
+    expect(r.headers['cache-control']).toBe('no-store');
+  });
+});

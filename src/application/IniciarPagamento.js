@@ -44,7 +44,7 @@ class IniciarPagamento {
   async executar({ pacienteId, consultaId }) {
     const consulta = await this.consultas.porId(consultaId);
     if (!consulta) {
-      throw new NaoEncontrado('Consulta');
+      throw new NaoEncontrado('Consulta', { feminino: true });
     }
 
     const agora = this.relogio.agora();

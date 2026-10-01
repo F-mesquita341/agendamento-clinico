@@ -80,7 +80,7 @@ const paginacao = z.object({
  * não revelar a existência é política da fronteira HTTP, e é aqui que ela mora.
  */
 function semRevelarExistencia(erro) {
-  return erro instanceof AcessoNegado ? new NaoEncontrado('Consulta') : erro;
+  return erro instanceof AcessoNegado ? new NaoEncontrado('Consulta', { feminino: true }) : erro;
 }
 
 function criarRotasDeConsultas({
@@ -165,7 +165,7 @@ function criarRotasDeConsultas({
 
       const leitura = await consultas.leituraPorId(id);
       if (!leitura) {
-        throw new NaoEncontrado('Consulta');
+        throw new NaoEncontrado('Consulta', { feminino: true });
       }
       if (!leitura.consulta.pertenceAo(req.paciente.id)) {
         throw new AcessoNegado('Esta consulta pertence a outro paciente.');

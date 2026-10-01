@@ -11,12 +11,20 @@ const { NaoEncontrado, RegraDeNegocio } = require('../../../domain/erros');
 const { validar } = require('../validacao');
 const { inteiroPositivo, data } = require('../esquemas');
 const apresentar = require('../apresentadores');
+const { semCache } = require('../middlewares/semCache');
 
 const rotas = Router();
 const profissionais = new RepositorioDeProfissionaisPg();
 const horarios = new RepositorioDeHorariosPg();
 
 const LIMITE_PADRAO = 20;
+
+// Cadastro de profissionais muda pouco — nome, especialidade, valor —, então o
+// aplicativo pode reaproveitar a resposta por alguns minutos. Curto, e não uma
+// hora como as especialidades: um profissional desativado ou com valor novo
+// não deve continuar aparecendo por muito tempo. Quem decide o agendamento é
+// a grade, que nunca vem de cache, e o próprio agendamento, que relê tudo.
+const CACHE_DO_CADASTRO = 'public, max-age=300';
 const JANELA_PADRAO_DIAS = 14;
 const JANELA_MAXIMA_DIAS = 60;
 
@@ -58,6 +66,7 @@ rotas.get('/', async (req, res, next) => {
       deslocamento: (filtros.pagina - 1) * filtros.limite,
     });
 
+    res.set('Cache-Control', CACHE_DO_CADASTRO);
     res.json({
       profissionais: itens.map(apresentar.profissional),
       paginacao: {
@@ -82,6 +91,7 @@ rotas.get('/:id', async (req, res, next) => {
       throw new NaoEncontrado('Profissional');
     }
 
+    res.set('Cache-Control', CACHE_DO_CADASTRO);
     res.json({ profissional: apresentar.profissional(profissional) });
   } catch (erro) {
     next(erro);
@@ -94,8 +104,14 @@ rotas.get('/:id', async (req, res, next) => {
  * Devolve apenas horários disponíveis e futuros, cada um com sua `versao` —
  * ver o comentário em apresentadores.horario sobre por que esse campo é
  * indispensável.
+ *
+ * NUNCA EM CACHE. A grade muda a cada agendamento, e uma grade velha mostraria
+ * como livre um horário que outra pessoa acabou de reservar. O lock otimista
+ * protege a integridade — o pedido com a versão velha recebe 409 —, mas o
+ * paciente não deveria nem ver o horário. Vale também para as respostas de
+ * erro, por isso é middleware, e não um cabeçalho posto só no sucesso.
  */
-rotas.get('/:id/horarios', async (req, res, next) => {
+rotas.get('/:id/horarios', semCache, async (req, res, next) => {
   try {
     const { id } = validar(idNaRota, req.params);
     const janela = validar(janelaDeHorarios, req.query);

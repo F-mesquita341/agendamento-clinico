@@ -191,6 +191,19 @@ A contagem fica na memória do processo. Com uma instância só, como hoje no
 Render, basta; com várias, cada uma contaria à parte, e o limite precisaria de
 um armazenamento compartilhado.
 
+### Cache
+
+| Resposta | `Cache-Control` | Por quê |
+|---|---|---|
+| `GET /especialidades` | `public, max-age=3600` | Lista fechada, quase nunca muda |
+| `GET /profissionais` e `/profissionais/:id` | `public, max-age=300` | Muda pouco, mas um profissional desativado ou com valor novo não deve aparecer por muito tempo |
+| `GET /profissionais/:id/horarios` | `no-store` | Uma grade velha mostraria como livre o horário que outra pessoa acabou de reservar |
+| Perfil, consultas, aparelhos | `no-store` | Dado pessoal — consulta marcada é dado de saúde |
+| `GET /consentimento/termo-vigente` | `no-store` | A troca de versão vale já no pedido seguinte |
+
+O lock otimista protege a integridade mesmo com uma grade velha — o pedido com a
+versão desatualizada recebe 409 —, mas o paciente não deveria nem ver o horário.
+
 ## Controle de concorrência
 
 Duas pessoas podem tentar o mesmo horário no mesmo instante. O agendamento usa
@@ -525,6 +538,19 @@ do [termo](docs/termo-de-consentimento.md). A API grava a versão aceita e o
 instante do aceite pelo relógio do servidor, e o banco recusa paciente sem esses
 dois campos. Cadastros e atualizações geram linha em `auditoria`, com os nomes
 dos campos alterados e nunca os valores.
+
+A versão vigente vem de `GET /consentimento/termo-vigente`, pública e sem
+cache:
+
+```json
+{ "termo": { "versao": "2026-09-v2" } }
+```
+
+O aplicativo não embute a versão: o termo ainda vai mudar depois do parecer do
+Comitê de Ética, e uma versão embutida quebraria o cadastro em todo aplicativo
+já instalado. **O aceite precisa ser do texto que a pessoa leu.** O texto vai no
+aplicativo; se a versão vigente não for a do texto que ele tem, o aplicativo
+não envia o aceite de um texto que não mostrou — pede para ser atualizado.
 
 ### Credencial do Firebase
 

@@ -150,7 +150,7 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
     return transacao(async (cliente) => {
       const consulta = await lerSobBloqueio(cliente, consultaId);
       if (!consulta) {
-        throw new NaoEncontrado('Consulta');
+        throw new NaoEncontrado('Consulta', { feminino: true });
       }
 
       // Relido sob bloqueio: entre a verificação do caso de uso e este ponto o
