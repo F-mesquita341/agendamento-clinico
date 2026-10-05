@@ -1530,3 +1530,105 @@ frase vai para a tela e para os prints desta monografia. O gênero passou a ser
 dito por quem lança o erro; adivinhá-lo pela terminação erraria em "Paciente".
 São cinco lugares que produzem a mensagem, e cada um ganhou o seu teste: tirar
 o feminino de qualquer um derruba exatamente o teste dele.
+
+## 01/10/2026 — Plano do front-end e Etapa 11: a fundação do aplicativo
+
+Com a API fechada, o projeto de pesquisa e os dois pareceres foram relidos para
+planejar o front-end. O plano cobre as Etapas 11 a 18 do aplicativo Flutter —
+o MVP do paciente — e uma trilha paralela para o protótipo do Figma (médico e
+administrador), com congelamento em 06/11. Do texto aprovado, o que amarra o
+aplicativo: Flutter com build Android (Quadro 2); camadas separadas (3.6);
+linguagem ubíqua; lock otimista **com fallback explícito ao usuário** (3.8.3);
+WCAG 2.1 AA — contraste 4,5:1, toque 44 × 44, retrato e paisagem, texto
+ampliado (3.7); tarefas-chave com 80% de conclusão e SUS ≥ 68 (4.5). Dos
+pareceres: as limitações do escopo, pedidas pelo prof. Bruno, passam a ser
+registradas aqui à medida que aparecem; o SUS em branco, pedido pelo prof.
+Wagner, entra no kit das sessões.
+
+**Decisões.** Repositório próprio e público, `agendamento-clinico-app`: mexer
+no aplicativo não pode disparar a integração contínua da API nem republicá-la
+no Render. Este diário continua sendo um só. Arquitetura pelo guia oficial do
+Flutter — telas e view models, repositórios atrás de interfaces, modelos
+imutáveis —, que espelha as camadas da API e é citável. Nada de analytics nem
+de relatório de falhas: dado de saúde não sai do aparelho para terceiros.
+
+**O que a Etapa 11 construiu.** O `ApiClient`, único ponto de contato com a
+API: põe o token, lê o envelope de erro, renova a sessão expirada uma única
+vez, respeita o `Retry-After` do 429 e transforma falta de resposta em
+`SEM_CONEXAO`. O aplicativo decide pelo campo `acao` — seis valores —, nunca
+pelo texto da mensagem. Toda data da API passa por um só conversor, que recusa
+instante sem fuso em vez de lê-lo como hora local. E o tema acessível, com o
+contraste de cada par de cor e texto conferido por teste.
+
+**Quarenta testes, e um que não provava o que dizia.** Doze defeitos
+reintroduzidos; onze derrubaram o teste esperado. O décimo segundo não: trocar
+a cor de partida do tema por um amarelo-claro deixou os testes de contraste
+verdes. O Material 3 deriva os tons de modo que texto e fundo contrastem com
+qualquer cor de partida — o teste dizia proteger uma coisa que não estava em
+risco. O risco real é sobrescrever uma cor à mão; com a cor principal trocada
+por amarelo, caíram exatamente os dois pares que a usam. O comentário do teste
+foi corrigido para dizer o que ele de fato protege.
+
+**Dois achados de configuração.** O modelo do Flutter só declara a permissão de
+internet no manifesto de depuração: o APK de release, que é o que os
+participantes vão usar, não alcançaria a API. Declarada no manifesto
+principal. E o `intl` mais novo conflitava com a versão fixada pelo Flutter;
+alinhado à do SDK.
+
+**Portão: atingido.** No emulador, o aplicativo abriu com a API dormindo — e o
+aviso "Acordando o servidor…" apareceu de verdade, não só no teste. Menos de
+um minuto depois, as seis especialidades vindas do banco de produção. As duas
+capturas estão em `docs/evidencias/` do repositório do aplicativo.
+
+## 05/10/2026 — Revisão da Etapa 11, e um APK com código que não existia mais
+
+A Etapa 11 foi relida com olhar de revisor, e o que a leitura não garante foi
+testado no emulador. Cinco achados, todos corrigidos com teste e defeito
+reintroduzido; e uma lição de processo que vale mais que os cinco.
+
+**Os achados.**
+
+1. O `ApiClient` só convertia em `SEM_CONEXAO` as falhas que o pacote `http`
+   reconhece — conferido na fonte dele: de socket e de HTTP. Uma falha de TLS
+   (relógio errado no aparelho, rede que intercepta o certificado) escaparia
+   como outro tipo, e a tela, que só tratava `ErroDaApi`, ficaria girando para
+   sempre. Agora toda falha de transporte vira `SEM_CONEXAO`, e a tela ganhou
+   uma rede de segurança: um erro que não veio da API é relatado como defeito
+   e a tela sai do carregando com uma mensagem. Na Etapa 12, a falha do
+   Firebase ao renovar o token cairia no mesmo buraco.
+2. O aviso "Acordando o servidor…" afirmava uma causa. Com a API fora do ar, a
+   conexão a partir do emulador não é recusada na hora: fica pendurada até o
+   prazo, e o app dizia que o servidor estava acordando durante 90 segundos.
+   Agora: "O servidor está demorando para responder. Se ele estava parado, o
+   primeiro acesso pode levar até um minuto."
+3. O prazo era aplicado duas vezes — um para os cabeçalhos, outro para o corpo
+   —, e a espera podia chegar a 180 segundos. Agora é um prazo só, provado com
+   tempo simulado: cabeçalhos aos 80 s e corpo parado dão erro aos 90.
+4. O README do app dizia que cada teste tinha sido confirmado por um defeito —
+   o mesmo exagero já corrigido neste diário em 24/09. Foi cada mecanismo.
+5. Puxar para atualizar fazia a lista sumir no meio do gesto. Agora ela fica,
+   e se a atualização falha, um aviso diz por quê.
+
+Uma suspeita foi descartada pela prova: o README ensina a apontar o app para
+uma API local por `http://10.0.2.2:3000`, e o Android bloqueia HTTP sem
+criptografia por padrão. Mas o Flutter usa sockets próprios, e funciona —
+confirmado desligando a API local e vendo o app deixar de carregar.
+
+**A lição.** Para conferir se o teste do texto a 200% tinha dentes, um defeito
+foi reintroduzido na tela de falha — mensagem e botão lado a lado — enquanto
+uma compilação do APK rodava em segundo plano. O compilador leu o arquivo com
+o defeito, e o defeito foi desfeito oito segundos antes de ele terminar. O APK
+saiu com a tela quebrada: mensagem estourando a largura, botão fora da tela.
+
+O pior veio depois. Recompilar não resolveu; atualizar a data do arquivo não
+resolveu; apagar o cache do Flutter não resolveu. Os caches do Flutter e do
+Gradle decidem pelo conteúdo dos arquivos, e registraram o conteúdo limpo como
+origem de um código compilado a partir do sujo. Para eles, estava tudo
+atualizado. Só o `flutter clean` desfez. O código-fonte nunca esteve errado, e
+o APK do portão de 01/10 foi compilado antes dos defeitos daquele dia — mas um
+APK assim na mão de um participante mostraria uma tela que não existe no
+repositório, e nenhum teste acusaria.
+
+Duas regras, no README do app e no plano: **nenhum defeito é reintroduzido com
+compilação rodando**, e **todo APK de portão ou de sessão sai de um
+`flutter clean`**.
