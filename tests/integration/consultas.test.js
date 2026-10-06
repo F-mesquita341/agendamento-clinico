@@ -346,6 +346,55 @@ describe('GET /consultas/:id', () => {
   });
 });
 
+describe('a clínica na leitura da consulta', () => {
+  // O detalhe e a próxima consulta mostram onde a consulta acontece e como
+  // falar com a clínica. A semente não tem telefone nem endereço: os nulos
+  // são o caso real de uma clínica com cadastro incompleto.
+  const CLINICA_DA_SEMENTE = () => ({
+    id: dados.clinicaId,
+    nome: 'Clínica de Teste',
+    telefone: null,
+    endereco: null,
+  });
+
+  test('o detalhe traz a clínica dentro do profissional', async () => {
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+
+    const r = await request(servidor).get(`/consultas/${consulta.id}`).set(comoA);
+
+    expect(r.body.consulta.profissional.clinica).toEqual(CLINICA_DA_SEMENTE());
+  });
+
+  test('a lista traz a clínica dentro do profissional', async () => {
+    await agendado(comoA, dados.horarios.amanha, 0);
+
+    const r = await request(servidor).get('/consultas').set(comoA);
+
+    expect(r.body.consultas[0].profissional.clinica).toEqual(CLINICA_DA_SEMENTE());
+  });
+
+  test('a resposta do agendamento continua sem profissional', async () => {
+    // Ela sai da própria transação, que devolve só a consulta: o aplicativo
+    // já tem o profissional na tela de onde veio.
+    const r = await agendar(comoA, { horarioId: dados.horarios.amanha, versao: 0 });
+
+    expect(r.status).toBe(201);
+    expect(r.body.consulta).not.toHaveProperty('profissional');
+  });
+
+  test('o CNPJ não sai na leitura da consulta', async () => {
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+
+    const detalhe = await request(servidor).get(`/consultas/${consulta.id}`).set(comoA);
+    const lista = await request(servidor).get('/consultas').set(comoA);
+
+    for (const corpo of [detalhe.body, lista.body]) {
+      expect(JSON.stringify(corpo)).not.toContain('11.111.111/0001-11');
+      expect(JSON.stringify(corpo)).not.toContain('cnpj');
+    }
+  });
+});
+
 describe('PATCH /consultas/:id/cancelamento', () => {
   test('devolve o horário à grade e mantém a consulta no histórico', async () => {
     const consulta = await agendado(comoA, dados.horarios.amanha, 0);

@@ -204,6 +204,23 @@ um armazenamento compartilhado.
 O lock otimista protege a integridade mesmo com uma grade velha — o pedido com a
 versão desatualizada recebe 409 —, mas o paciente não deveria nem ver o horário.
 
+### Clínica do profissional
+
+Todo profissional sai com a clínica onde atende — em `GET /profissionais`,
+`GET /profissionais/:id`, `GET /consultas` e `GET /consultas/:id`:
+
+```json
+"clinica": { "id": 1, "nome": "Clínica Exemplo Quixadá", "telefone": "(88) 3000-0000", "endereco": "Centro, Quixadá - CE" }
+```
+
+É o contato que o aplicativo mostra para o paciente ligar ou chegar à consulta.
+`telefone` e `endereco` podem vir `null` — a chave existe sempre, para o
+aplicativo decidir pela presença do valor se mostra "Ligar" ou "Abrir no mapa".
+O CNPJ não sai: o repositório não o seleciona, e o apresentador devolve uma
+lista fechada de campos. A resposta do `POST /consultas` continua sem
+`profissional`, e o cache de `/profissionais` continua o mesmo: clínica também
+é cadastro, que muda pouco.
+
 ## Controle de concorrência
 
 Duas pessoas podem tentar o mesmo horário no mesmo instante. O agendamento usa

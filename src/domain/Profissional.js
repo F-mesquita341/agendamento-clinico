@@ -14,6 +14,7 @@ class Profissional {
   constructor({
     id,
     clinicaId,
+    clinica,
     nome,
     registroConselho,
     especialidade,
@@ -22,6 +23,10 @@ class Profissional {
   }) {
     this.id = id;
     this.clinicaId = clinicaId;
+    // { id, nome, telefone, endereco } — telefone e endereço podem faltar.
+    // É o contato que o paciente usa para chegar à consulta ou ligar para a
+    // clínica.
+    this.clinica = clinica ?? null;
     this.nome = nome;
     this.registroConselho = registroConselho;
     // { id, nome }

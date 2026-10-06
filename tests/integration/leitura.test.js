@@ -396,3 +396,59 @@ describe('cache das leituras públicas', () => {
     expect(r.headers['cache-control']).toBe('no-store');
   });
 });
+
+describe('a clínica do profissional', () => {
+  // O aplicativo mostra o contato da clínica para o paciente ligar ou chegar
+  // à consulta (heurísticas 10.3, 1.4, 5.1 e 6.2 da checklist do app).
+  const CNPJ_DA_SEMENTE = '11.111.111/0001-11';
+
+  test('vem com o profissional, com telefone e endereço nulos quando faltam', async () => {
+    const r = await request(servidor).get(`/profissionais/${dados.profissionais.jose}`);
+
+    expect(r.status).toBe(200);
+    expect(r.body.profissional.clinica).toEqual({
+      id: dados.clinicaId,
+      nome: 'Clínica de Teste',
+      telefone: null,
+      endereco: null,
+    });
+  });
+
+  test('traz telefone e endereço quando a clínica os tem', async () => {
+    await consultar(
+      `UPDATE clinica SET telefone = '(88) 3000-0000', endereco = 'Rua de Teste, 100 - Centro, Quixadá - CE'
+        WHERE id = $1`,
+      [dados.clinicaId]
+    );
+    try {
+      const r = await request(servidor).get(`/profissionais/${dados.profissionais.jose}`);
+
+      expect(r.body.profissional.clinica).toMatchObject({
+        telefone: '(88) 3000-0000',
+        endereco: 'Rua de Teste, 100 - Centro, Quixadá - CE',
+      });
+    } finally {
+      // O arquivo semeia uma vez só: os testes seguintes contam com os nulos.
+      await consultar('UPDATE clinica SET telefone = NULL, endereco = NULL WHERE id = $1', [dados.clinicaId]);
+    }
+  });
+
+  test('vem em cada profissional da lista', async () => {
+    const r = await request(servidor).get('/profissionais');
+
+    expect(r.body.profissionais.length).toBeGreaterThan(0);
+    for (const profissional of r.body.profissionais) {
+      expect(profissional.clinica).toMatchObject({ id: dados.clinicaId, nome: 'Clínica de Teste' });
+    }
+  });
+
+  test.each([
+    ['na lista', () => '/profissionais'],
+    ['no detalhe', () => `/profissionais/${dados.profissionais.jose}`],
+  ])('o CNPJ não sai %s', async (_rotulo, caminho) => {
+    const r = await request(servidor).get(caminho());
+
+    expect(JSON.stringify(r.body)).not.toContain(CNPJ_DA_SEMENTE);
+    expect(JSON.stringify(r.body)).not.toContain('cnpj');
+  });
+});
