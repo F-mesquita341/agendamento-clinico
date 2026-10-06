@@ -15,6 +15,20 @@ function especialidade(e) {
   return { id: e.id, nome: e.nome };
 }
 
+/**
+ * A clínica onde o profissional atende: o contato que o aplicativo mostra
+ * para o paciente ligar ou chegar ao local. Lista fechada de campos — o CNPJ
+ * fica de fora, porque o aplicativo não usa.
+ */
+function clinica(c) {
+  return {
+    id: c.id,
+    nome: c.nome,
+    telefone: c.telefone ?? null,
+    endereco: c.endereco ?? null,
+  };
+}
+
 function profissional(p) {
   return {
     id: p.id,
@@ -23,6 +37,7 @@ function profissional(p) {
     especialidade: p.especialidade ? especialidade(p.especialidade) : null,
     valorCentavos: p.valorConsulta.centavos,
     valorFormatado: p.valorConsulta.formatar(),
+    clinica: p.clinica ? clinica(p.clinica) : null,
   };
 }
 

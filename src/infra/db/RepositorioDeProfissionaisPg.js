@@ -35,6 +35,12 @@ function paraEntidade(linha) {
   return new Profissional({
     id: Number(linha.id),
     clinicaId: Number(linha.clinica_id),
+    clinica: {
+      id: Number(linha.clinica_id),
+      nome: linha.clinica_nome,
+      telefone: linha.clinica_telefone ?? null,
+      endereco: linha.clinica_endereco ?? null,
+    },
     nome: linha.nome,
     registroConselho: linha.registro_conselho,
     especialidade: {
@@ -49,12 +55,18 @@ function paraEntidade(linha) {
 const COLUNAS = `
   p.id, p.clinica_id, p.nome, p.registro_conselho,
   p.valor_consulta_centavos, p.ativo,
-  e.id AS especialidade_id, e.nome AS especialidade_nome
+  e.id AS especialidade_id, e.nome AS especialidade_nome,
+  cl.nome AS clinica_nome, cl.telefone AS clinica_telefone, cl.endereco AS clinica_endereco
 `;
 
+// JOIN comum com a clínica, e não LEFT JOIN: `profissional.clinica_id` é
+// obrigatório e tem chave estrangeira, então toda linha encontra a sua, e a
+// contagem e a paginação não mudam. O CNPJ não é selecionado: o app não usa.
+// Alias `cl`, porque na leitura de consultas `c` já é a consulta.
 const ORIGEM = `
   FROM profissional p
   JOIN especialidade e ON e.id = p.especialidade_id
+  JOIN clinica cl      ON cl.id = p.clinica_id
 `;
 
 // ESCAPE '\' declara explicitamente o caractere de escape usado por

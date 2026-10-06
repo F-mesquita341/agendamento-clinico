@@ -207,6 +207,11 @@ class RepositorioDeEspecialidades {
   }
 }
 
+/**
+ * Todo profissional devolvido vem com a especialidade e com a clínica onde
+ * atende (`{ id, nome, telefone, endereco }`), que é o que o paciente precisa
+ * para chegar à consulta ou ligar.
+ */
 class RepositorioDeProfissionais {
   /**
    * Busca paginada, filtrando por especialidade e por trecho do nome.

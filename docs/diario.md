@@ -1632,3 +1632,45 @@ repositório, e nenhum teste acusaria.
 Duas regras, no README do app e no plano: **nenhum defeito é reintroduzido com
 compilação rodando**, e **todo APK de portão ou de sessão sai de um
 `flutter clean`**.
+
+## 06/10/2026 — O contrato reaberto para a clínica
+
+O contrato com o aplicativo foi fechado em 30/09 e reaberto hoje, de forma só
+aditiva. Quem pediu foi a sessão do aplicativo: ao conferir a checklist de
+heurísticas de Nielsen contra a API, antes do desenho das telas, achou uma
+única coisa que a API não entregava — o contato da clínica.
+
+- **10.3** (essencial): falar com a clínica a um toque, no perfil do
+  profissional, no detalhe da consulta e na ajuda.
+- **1.4 e 5.1** (essenciais): o endereço no resumo antes de confirmar e na tela
+  de sucesso — o paciente confere onde vai antes de pagar.
+- **6.2** (essencial): a próxima consulta mostra onde acontece.
+- **2.9** (desejável): "Ligar" e "Abrir no mapa".
+
+A tabela `clinica` já tinha nome, telefone e endereço desde o esquema inicial;
+nenhuma rota os devolvia. Agora todo profissional sai com
+`clinica: { id, nome, telefone, endereco }` nas quatro leituras que o mostram —
+lista e detalhe de profissionais, lista e detalhe de consultas. Telefone e
+endereço podem vir nulos, com a chave presente. Nenhum campo existente mudou, e
+a tradução da linha do banco continua uma só, compartilhada pelas duas leituras.
+
+**O CNPJ fica de fora duas vezes.** O repositório não o seleciona, e o
+apresentador devolve uma lista fechada de campos. Ao reintroduzir o defeito do
+apresentador — trocar a lista fechada por uma cópia do objeto inteiro —, o
+teste de integração continuou verde: o CNPJ nunca chega ao apresentador, porque
+o repositório não o lê. A barreira do apresentador estava sem teste nenhum.
+Ganhou um teste unitário, que monta um profissional com o CNPJ na clínica e
+confere que só os quatro campos saem. Os outros três defeitos — apresentador
+sem a clínica, repositório de profissionais sem o JOIN, leitura de consultas
+sem as colunas — derrubaram os testes de integração previstos.
+
+**Duas decisões, tomadas com o Felipe.**
+
+- **Sem WhatsApp.** O aplicativo oferece só "Ligar", com o telefone que a
+  clínica já tem cadastrado. O contato por WhatsApp, comum em clínicas, fica
+  registrado como limitação do trabalho.
+- **Endereço fictício por enquanto.** Em produção, a clínica é a do seed:
+  "Clínica Exemplo Quixadá", com telefone e endereço inventados. Os dados reais
+  da clínica parceira entram antes das sessões com participantes — e não pelo
+  seed, que usa `ON CONFLICT (cnpj) DO NOTHING` e não sobrescreve a linha que
+  já existe: exige um `UPDATE` explícito.

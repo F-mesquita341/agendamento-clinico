@@ -38,7 +38,9 @@ const COLUNAS_DA_LEITURA = `
   p.id AS p_id, p.clinica_id AS p_clinica_id, p.nome AS p_nome,
   p.registro_conselho AS p_registro_conselho,
   p.valor_consulta_centavos AS p_valor_consulta_centavos, p.ativo AS p_ativo,
-  e.id AS p_especialidade_id, e.nome AS p_especialidade_nome
+  e.id AS p_especialidade_id, e.nome AS p_especialidade_nome,
+  cl.nome AS p_clinica_nome, cl.telefone AS p_clinica_telefone,
+  cl.endereco AS p_clinica_endereco
 `;
 
 const ORIGEM_DA_LEITURA = `
@@ -46,6 +48,7 @@ const ORIGEM_DA_LEITURA = `
   JOIN horario h       ON h.id = c.horario_id
   JOIN profissional p  ON p.id = h.profissional_id
   JOIN especialidade e ON e.id = p.especialidade_id
+  JOIN clinica cl      ON cl.id = p.clinica_id
 `;
 
 /** Recorta as colunas de um prefixo e devolve os nomes originais. */
