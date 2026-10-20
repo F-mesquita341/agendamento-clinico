@@ -17,3 +17,7 @@ docs/resultados/**/*.tmp
 # recusa gravar dentro do repositório; isto é a segunda proteção, para um CSV
 # copiado à mão.
 *.csv
+
+# O diário de trabalho fica só na máquina do autor. As versões até 06/10/2026
+# continuam no histórico; daqui em diante ele não é mais acompanhado.
+docs/diario.md
