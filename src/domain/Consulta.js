@@ -190,12 +190,15 @@ class Consulta {
     }
     // A reserva vencida está nas mãos da rotina de expiração, que pergunta ao
     // provedor antes de devolver o horário: o pagamento pode ter sido aprovado
-    // e o aviso, perdido. Cancelar por aqui decidiria sem perguntar. A mesma
-    // recusa — e a mesma mensagem — que o pagamento já dá.
+    // e o aviso, perdido. Cancelar por aqui decidiria sem perguntar. O mesmo
+    // código que o pagamento dá, com mensagem própria: o aplicativo mostra a
+    // mensagem a quem está cancelando, e "escolha o horário de novo" não faz
+    // sentido para quem queria desistir.
     if (this.expirouAguardandoPagamento(agora)) {
       throw new RegraDeNegocio(
         'RESERVA_EXPIRADA',
-        'O prazo para pagar esta reserva terminou. Escolha o horário de novo.'
+        'Esta reserva já venceu e o horário será liberado automaticamente em instantes. ' +
+          'Não é preciso cancelar.'
       );
     }
     // Consulta paga que já começou: quem faltou não pode virar "cancelada pelo

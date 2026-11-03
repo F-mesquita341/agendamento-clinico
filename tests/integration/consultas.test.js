@@ -553,6 +553,9 @@ describe('PATCH /consultas/:id/cancelamento', () => {
 
     expect(r.status).toBe(422);
     expect(r.body.erro).toMatchObject({ codigo: 'RESERVA_EXPIRADA', acao: null });
+    // O aplicativo mostra esta mensagem a quem está cancelando: a do pagamento
+    // ("escolha o horário de novo") não serviria aqui.
+    expect(r.body.erro.mensagem).toMatch(/Não é preciso cancelar/);
     expect((await consultasPg.porId(consulta.id)).status).toBe('pendente_pagamento');
 
     // A decisão fica com a rotina, que devolve o horário como sempre.
