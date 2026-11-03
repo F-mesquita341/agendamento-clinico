@@ -145,23 +145,37 @@ class Consulta {
     }
   }
 
-  garantirQuePodeSerCanceladaPor(pacienteId) {
+  /**
+   * @param {string|number} pacienteId quem pede o cancelamento
+   * @param {{agora: Date, inicioDoHorario: Date}} momento ver abaixo
+   */
+  garantirQuePodeSerCanceladaPor(pacienteId, momento) {
     if (!this.pertenceAo(pacienteId)) {
       throw new AcessoNegado('Esta consulta pertence a outro paciente.');
     }
-    this.garantirQuePodeSerCancelada();
+    this.garantirQuePodeSerCancelada(momento);
   }
 
   /**
-   * Só o estado, sem a questão do dono.
+   * Só o estado e o tempo, sem a questão do dono.
    *
    * O adaptador de persistência repete esta verificação sob bloqueio de linha,
    * porque entre a checagem do caso de uso e a escrita cabe outro cancelamento
    * da mesma consulta — dedo duplo no botão, aplicativo reenviando depois de
    * uma queda de rede. Separar evita que a mensagem certa para cada estado
    * exista em dois lugares.
+   *
+   * O instante e o início do horário são obrigatórios, e a falta deles é erro
+   * de programação, não regra pulada: uma chamada esquecida sem eles deixaria
+   * o paciente cancelar a consulta a que faltou, e a falta viraria
+   * "cancelada pelo paciente" nos dados de absenteísmo.
+   *
+   * @param {{agora: Date, inicioDoHorario: Date}} momento
    */
-  garantirQuePodeSerCancelada() {
+  garantirQuePodeSerCancelada({ agora, inicioDoHorario } = {}) {
+    if (!(agora instanceof Date) || inicioDoHorario == null) {
+      throw new TypeError('O cancelamento exige o instante atual e o início do horário.');
+    }
     if (this.status === STATUS.CANCELADA) {
       throw new RegraDeNegocio(
         'CONSULTA_JA_CANCELADA',
@@ -172,6 +186,34 @@ class Consulta {
       throw new RegraDeNegocio(
         'CONSULTA_NAO_CANCELAVEL',
         'Consultas já realizadas não podem ser canceladas.'
+      );
+    }
+    // A reserva vencida está nas mãos da rotina de expiração, que pergunta ao
+    // provedor antes de devolver o horário: o pagamento pode ter sido aprovado
+    // e o aviso, perdido. Cancelar por aqui decidiria sem perguntar. O mesmo
+    // código que o pagamento dá, com mensagem própria: o aplicativo mostra a
+    // mensagem a quem está cancelando, e "escolha o horário de novo" não faz
+    // sentido para quem queria desistir.
+    if (this.expirouAguardandoPagamento(agora)) {
+      throw new RegraDeNegocio(
+        'RESERVA_EXPIRADA',
+        'Esta reserva já venceu e o horário será liberado automaticamente em instantes. ' +
+          'Não é preciso cancelar.'
+      );
+    }
+    // Consulta paga que já começou: quem faltou não pode virar "cancelada pelo
+    // paciente" — a falta é o dado que a pesquisa mede. A devolução integral
+    // vale só antes do horário (decisão de 20/10/2026). A pendente que já
+    // começou continua cancelável: ainda não foi paga, e a reserva vence
+    // sozinha em minutos.
+    if (
+      this.status === STATUS.CONFIRMADA &&
+      new Date(inicioDoHorario).getTime() <= agora.getTime()
+    ) {
+      throw new RegraDeNegocio(
+        'CONSULTA_JA_INICIADA',
+        'Esta consulta já começou e não pode mais ser cancelada pelo aplicativo. ' +
+          'Fale com a clínica.'
       );
     }
   }

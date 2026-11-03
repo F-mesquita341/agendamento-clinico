@@ -17,7 +17,7 @@ const AGORA = new Date('2026-10-05T12:00:00-03:00');
 const DAQUI_A_UMA_HORA = new Date('2026-10-05T13:00:00-03:00');
 
 /** Monta o cenário com uma consulta já agendada pelo paciente informado. */
-async function comConsultaAgendada({ pacienteId = 7 } = {}) {
+async function comConsultaAgendada({ pacienteId = 7, cancelarEm = AGORA } = {}) {
   const horario = umHorario({ id: 1, inicio: DAQUI_A_UMA_HORA, versao: 0 });
   const repos = criarRepositorios([horario]);
 
@@ -26,7 +26,11 @@ async function comConsultaAgendada({ pacienteId = 7 } = {}) {
     consultas: repos.consultas,
     relogio: relogioFixo(AGORA),
   });
-  const cancelar = new CancelarConsulta({ consultas: repos.consultas });
+  const cancelar = new CancelarConsulta({
+    consultas: repos.consultas,
+    horarios: repos.horarios,
+    relogio: relogioFixo(cancelarEm),
+  });
 
   const consulta = await agendar.executar({ pacienteId, horarioId: 1, versao: 0 });
 
@@ -114,6 +118,50 @@ describe('CancelarConsulta', () => {
     await expect(
       cancelar.executar({ pacienteId: 7, consultaId: consulta.id })
     ).rejects.toMatchObject({ codigo: 'CONSULTA_NAO_CANCELAVEL', status: 422 });
+  });
+
+  test('consulta paga que já começou é recusada, e nada muda', async () => {
+    // A consulta é às 13:00; o pedido chega às 13:01. Quem faltou não pode
+    // virar "cancelada pelo paciente" nos dados de absenteísmo.
+    const umMinutoDepois = new Date(DAQUI_A_UMA_HORA.getTime() + 60_000);
+    const { cancelar, consultas, horarios, consulta } = await comConsultaAgendada({
+      cancelarEm: umMinutoDepois,
+    });
+    (await consultas.porId(consulta.id)).status = 'confirmada';
+
+    await expect(
+      cancelar.executar({ pacienteId: 7, consultaId: consulta.id })
+    ).rejects.toMatchObject({ codigo: 'CONSULTA_JA_INICIADA', status: 422, acao: null });
+
+    expect((await consultas.porId(consulta.id)).status).toBe('confirmada');
+    expect((await horarios.porId(1)).status).toBe('reservado');
+  });
+
+  test('consulta paga ainda no futuro continua cancelável', async () => {
+    const umMinutoAntes = new Date(DAQUI_A_UMA_HORA.getTime() - 60_000);
+    const { cancelar, consultas, consulta } = await comConsultaAgendada({
+      cancelarEm: umMinutoAntes,
+    });
+    (await consultas.porId(consulta.id)).status = 'confirmada';
+
+    await cancelar.executar({ pacienteId: 7, consultaId: consulta.id });
+
+    expect((await consultas.porId(consulta.id)).status).toBe('cancelada');
+  });
+
+  test('reserva vencida é recusada com RESERVA_EXPIRADA, e fica para a rotina', async () => {
+    // A reserva nasce às 12:00 e vence às 12:15; o pedido chega às 12:20.
+    const depoisDoPrazo = new Date(AGORA.getTime() + 20 * 60_000);
+    const { cancelar, consultas, horarios, consulta } = await comConsultaAgendada({
+      cancelarEm: depoisDoPrazo,
+    });
+
+    await expect(
+      cancelar.executar({ pacienteId: 7, consultaId: consulta.id })
+    ).rejects.toMatchObject({ codigo: 'RESERVA_EXPIRADA', status: 422, acao: null });
+
+    expect((await consultas.porId(consulta.id)).status).toBe('pendente_pagamento');
+    expect((await horarios.porId(1)).status).toBe('reservado');
   });
 
   test('consulta inexistente responde 404', async () => {

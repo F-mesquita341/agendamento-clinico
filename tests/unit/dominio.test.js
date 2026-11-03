@@ -75,6 +75,11 @@ describe('Horario', () => {
 
 describe('Consulta', () => {
   const base = { id: 1, pacienteId: 7, horarioId: 1, valor: 15000 };
+  // Consulta às 14:00, julgada às 12:00: antes do início, fora de qualquer regra de tempo.
+  const ANTES_DO_INICIO = {
+    agora: new Date('2026-10-05T12:00:00-03:00'),
+    inicioDoHorario: new Date('2026-10-05T14:00:00-03:00'),
+  };
 
   test('só cancelada deixa de ocupar o horário', () => {
     expect(new Consulta({ ...base, status: 'confirmada' }).estaAtiva()).toBe(true);
@@ -103,7 +108,7 @@ describe('Consulta', () => {
   test('cancelar consulta de outro paciente é 403, não 404', () => {
     const consulta = new Consulta({ ...base, status: 'confirmada' });
 
-    expect(() => consulta.garantirQuePodeSerCanceladaPor(99)).toThrow(
+    expect(() => consulta.garantirQuePodeSerCanceladaPor(99, ANTES_DO_INICIO)).toThrow(
       expect.objectContaining({ status: 403 })
     );
   });
@@ -111,9 +116,48 @@ describe('Consulta', () => {
   test('consulta já realizada não pode ser cancelada', () => {
     const consulta = new Consulta({ ...base, status: 'realizada' });
 
-    expect(() => consulta.garantirQuePodeSerCanceladaPor(7)).toThrow(
+    expect(() => consulta.garantirQuePodeSerCanceladaPor(7, ANTES_DO_INICIO)).toThrow(
       expect.objectContaining({ codigo: 'CONSULTA_NAO_CANCELAVEL' })
     );
+  });
+
+  describe('cancelamento e o tempo', () => {
+    const INICIO = new Date('2026-10-05T14:00:00-03:00');
+    const as = (hora) => new Date(`2026-10-05T${hora}:00-03:00`);
+    const em = (hora) => ({ agora: as(hora), inicioDoHorario: INICIO });
+    const confirmada = () => new Consulta({ ...base, status: 'confirmada' });
+    const pendente = (expiraAs) =>
+      new Consulta({ ...base, status: 'pendente_pagamento', reservaExpiraEm: as(expiraAs) });
+
+    test('confirmada antes do início pode ser cancelada', () => {
+      expect(() => confirmada().garantirQuePodeSerCanceladaPor(7, em('13:59'))).not.toThrow();
+    });
+
+    test('confirmada que já começou é recusada, mandando falar com a clínica', () => {
+      for (const hora of ['14:00', '14:30', '18:00']) {
+        expect(() => confirmada().garantirQuePodeSerCanceladaPor(7, em(hora))).toThrow(
+          expect.objectContaining({ codigo: 'CONSULTA_JA_INICIADA', status: 422, acao: null })
+        );
+      }
+      expect(() => confirmada().garantirQuePodeSerCancelada(em('14:00'))).toThrow(/Fale com a clínica/);
+    });
+
+    test('reserva vencida é recusada com RESERVA_EXPIRADA, como no pagamento', () => {
+      expect(() => pendente('12:15').garantirQuePodeSerCanceladaPor(7, em('12:15'))).toThrow(
+        expect.objectContaining({ codigo: 'RESERVA_EXPIRADA', status: 422, acao: null })
+      );
+    });
+
+    test('reserva ainda no prazo pode ser cancelada, mesmo depois do início', () => {
+      expect(() => pendente('12:15').garantirQuePodeSerCanceladaPor(7, em('12:14'))).not.toThrow();
+      expect(() => pendente('14:10').garantirQuePodeSerCanceladaPor(7, em('14:05'))).not.toThrow();
+    });
+
+    test('sem o instante ou sem o início, é erro de programação, não regra pulada', () => {
+      expect(() => confirmada().garantirQuePodeSerCancelada()).toThrow(TypeError);
+      expect(() => confirmada().garantirQuePodeSerCancelada({ agora: new Date() })).toThrow(TypeError);
+      expect(() => confirmada().garantirQuePodeSerCancelada({ inicioDoHorario: INICIO })).toThrow(TypeError);
+    });
   });
 
   describe('precisaDeLembrete', () => {

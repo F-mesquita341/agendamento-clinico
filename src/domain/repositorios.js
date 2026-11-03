@@ -122,13 +122,17 @@ class RepositorioDeConsultas {
    *
    * Relê o estado sob bloqueio de linha antes de cancelar: entre a verificação
    * do caso de uso e esta escrita cabe outro cancelamento da mesma consulta.
-   * Lança `NaoEncontrado` se a consulta não existir e o erro de estado do
-   * domínio se ela não admitir mais cancelamento.
+   * Lança `NaoEncontrado` se a consulta não existir e o erro do domínio se ela
+   * não admitir mais cancelamento — pelo estado, pela reserva vencida ou por
+   * já ter começado. Por isso o instante vem junto: o adaptador julga o mesmo
+   * momento que o caso de uso julgou.
    *
+   * @param {number} _consultaId
+   * @param {Date} _agora
    * @returns {Promise<import('./Consulta').Consulta>} a consulta já cancelada —
    *          é ela que a resposta HTTP devolve, com valor e horário.
    */
-  async cancelar(_consultaId) {
+  async cancelar(_consultaId, _agora) {
     naoImplementado('RepositorioDeConsultas.cancelar');
   }
 
