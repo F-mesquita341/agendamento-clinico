@@ -21,6 +21,7 @@ const config = require('../src/config');
 const { consultar, encerrar } = require('../src/infra/db/pool');
 const { descreverBanco } = require('./descreverBanco');
 const { lerPeriodo, PeriodoInvalido } = require('./periodoDoSeed');
+const { criarGrade } = require('./gradeDoSeed');
 
 const ESPECIALIDADES = [
   'Clínica Geral',
@@ -77,35 +78,7 @@ async function semear({ hoje, ultimoDia }) {
     console.log(`  ${jaTem[0].n} profissionais já existiam`);
   }
 
-  // Agenda de amanhã até o último dia do período, inclusive: seg a sex,
-  // 08:00–11:30 e 14:00–17:30, em blocos de 30 minutos, no fuso de Fortaleza.
-  // As duas datas vêm de periodoDoSeed.js, já no fuso da clínica. Horário que
-  // já existe fica como está — reservado ou não —, e consulta não é tocada.
-  const { rowCount: horariosCriados } = await consultar(
-    `
-    INSERT INTO horario (profissional_id, inicio, fim)
-    SELECT p.id,
-           (s.momento AT TIME ZONE 'America/Fortaleza'),
-           (s.momento AT TIME ZONE 'America/Fortaleza') + INTERVAL '30 minutes'
-      FROM profissional p
-      CROSS JOIN LATERAL (
-        SELECT gs AS momento
-          FROM generate_series(
-                 ($1::date + 1)::timestamp,
-                 ($2::date + 1)::timestamp,
-                 INTERVAL '30 minutes'
-               ) gs
-         WHERE EXTRACT(dow FROM gs) BETWEEN 1 AND 5
-           AND (
-             (gs::time >= TIME '08:00' AND gs::time < TIME '11:30') OR
-             (gs::time >= TIME '14:00' AND gs::time < TIME '17:30')
-           )
-      ) s
-     WHERE p.ativo
-    ON CONFLICT (profissional_id, inicio) DO NOTHING;
-  `,
-    [hoje, ultimoDia]
-  );
+  const horariosCriados = await criarGrade(consultar, { hoje, ultimoDia });
   console.log(`  ${horariosCriados} horários criados`);
 
   const { rows: resumo } = await consultar(`

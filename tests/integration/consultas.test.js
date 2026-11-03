@@ -355,6 +355,9 @@ describe('a clínica na leitura da consulta', () => {
     nome: 'Clínica de Teste',
     telefone: null,
     endereco: null,
+    cidade: null,
+    latitude: null,
+    longitude: null,
   });
 
   test('o detalhe traz a clínica dentro do profissional', async () => {
@@ -363,6 +366,35 @@ describe('a clínica na leitura da consulta', () => {
     const r = await request(servidor).get(`/consultas/${consulta.id}`).set(comoA);
 
     expect(r.body.consulta.profissional.clinica).toEqual(CLINICA_DA_SEMENTE());
+  });
+
+  test('versão 2: a clínica traz a cidade, e os campos do catálogo ficam de fora', async () => {
+    // Planos, formas de pagamento e próximo horário são do catálogo. Na
+    // consulta eles não foram lidos, e por isso não saem — um
+    // `proximoHorario: null` aqui diria ao app que o profissional não tem
+    // horário, o que não é o assunto da consulta.
+    const { rows } = await consultar(
+      `INSERT INTO cidade (nome, uf) VALUES ('Quixadá', 'CE') RETURNING id`
+    );
+    await consultar(
+      `UPDATE clinica SET cidade_id = $2, latitude = -4.97, longitude = -39.01 WHERE id = $1`,
+      [dados.clinicaId, rows[0].id]
+    );
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+
+    const detalhe = await request(servidor).get(`/consultas/${consulta.id}`).set(comoA);
+    const lista = await request(servidor).get('/consultas').set(comoA);
+
+    for (const profissional of [detalhe.body.consulta.profissional, lista.body.consultas[0].profissional]) {
+      expect(profissional.clinica).toMatchObject({
+        cidade: { id: Number(rows[0].id), nome: 'Quixadá', uf: 'CE' },
+        latitude: -4.97,
+        longitude: -39.01,
+      });
+      expect(profissional).not.toHaveProperty('planos');
+      expect(profissional).not.toHaveProperty('formasDePagamento');
+      expect(profissional).not.toHaveProperty('proximoHorario');
+    }
   });
 
   test('a lista traz a clínica dentro do profissional', async () => {

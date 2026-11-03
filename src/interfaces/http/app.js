@@ -21,6 +21,8 @@ const cors = require('cors');
 const config = require('../../config');
 const saude = require('./rotas/saude');
 const especialidades = require('./rotas/especialidades');
+const cidades = require('./rotas/cidades');
+const planos = require('./rotas/planos');
 const profissionais = require('./rotas/profissionais');
 const consentimento = require('./rotas/consentimento');
 const { criarRotasDePacientes } = require('./rotas/pacientes');
@@ -83,6 +85,8 @@ function criarApp({
 
   app.use(saude);
   app.use('/especialidades', especialidades);
+  app.use('/cidades', cidades);
+  app.use('/planos', planos);
   app.use('/profissionais', profissionais);
   app.use('/consentimento', consentimento);
   app.use('/pacientes', criarRotasDePacientes({ verificarToken, pacientes, relogio, limitarEscritas }));

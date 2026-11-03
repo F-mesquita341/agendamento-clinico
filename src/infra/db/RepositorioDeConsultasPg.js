@@ -40,15 +40,22 @@ const COLUNAS_DA_LEITURA = `
   p.valor_consulta_centavos AS p_valor_consulta_centavos, p.ativo AS p_ativo,
   e.id AS p_especialidade_id, e.nome AS p_especialidade_nome,
   cl.nome AS p_clinica_nome, cl.telefone AS p_clinica_telefone,
-  cl.endereco AS p_clinica_endereco
+  cl.endereco AS p_clinica_endereco,
+  cl.latitude AS p_clinica_latitude, cl.longitude AS p_clinica_longitude,
+  ci.id AS p_clinica_cidade_id, ci.nome AS p_clinica_cidade_nome,
+  ci.uf AS p_clinica_cidade_uf
 `;
 
+// A clínica sai completa, com a cidade: o detalhe da consulta mostra onde ela
+// acontece. Planos, formas de pagamento e próximo horário não entram: são do
+// catálogo, e na consulta ficam "não lidos" — o apresentador os omite.
 const ORIGEM_DA_LEITURA = `
   FROM consulta c
   JOIN horario h       ON h.id = c.horario_id
   JOIN profissional p  ON p.id = h.profissional_id
   JOIN especialidade e ON e.id = p.especialidade_id
   JOIN clinica cl      ON cl.id = p.clinica_id
+  LEFT JOIN cidade ci  ON ci.id = cl.cidade_id
 `;
 
 /** Recorta as colunas de um prefixo e devolve os nomes originais. */

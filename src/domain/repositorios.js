@@ -212,17 +212,42 @@ class RepositorioDeEspecialidades {
 }
 
 /**
+ * Cidades que têm ao menos um profissional ativo — as que fazem sentido numa
+ * lista de escolha. Uma cidade sem ninguém para atender daria uma busca vazia.
+ */
+class RepositorioDeCidades {
+  /** @returns {Promise<Array<{id: number, nome: string, uf: string}>>} */
+  async listar() {
+    naoImplementado('RepositorioDeCidades.listar');
+  }
+}
+
+/** Planos aceitos por ao menos um profissional ativo, pelo mesmo motivo. */
+class RepositorioDePlanos {
+  /** @returns {Promise<Array<{id: number, nome: string}>>} */
+  async listar() {
+    naoImplementado('RepositorioDePlanos.listar');
+  }
+}
+
+/**
  * Todo profissional devolvido vem com a especialidade e com a clínica onde
- * atende (`{ id, nome, telefone, endereco }`), que é o que o paciente precisa
- * para chegar à consulta ou ligar.
+ * atende (`{ id, nome, telefone, endereco, cidade, latitude, longitude }`),
+ * que é o que o paciente precisa para chegar à consulta ou ligar; e, nas duas
+ * leituras do catálogo (lista e detalhe), com os planos aceitos e o próximo
+ * horário livre (`null` quando não há).
  */
 class RepositorioDeProfissionais {
   /**
-   * Busca paginada, filtrando por especialidade e por trecho do nome.
+   * Busca paginada, filtrando por especialidade, trecho do nome, cidade da
+   * clínica e plano aceito. Os filtros se combinam; id inexistente devolve
+   * lista vazia.
    *
    * @param {object} filtros
    * @param {number} [filtros.especialidadeId]
    * @param {string} [filtros.termo] trecho do nome, sem diferenciar acento
+   * @param {number} [filtros.cidadeId]
+   * @param {number} [filtros.planoId]
    * @param {number} filtros.limite
    * @param {number} filtros.deslocamento
    * @returns {Promise<{itens: Array, total: number}>}
@@ -335,6 +360,8 @@ module.exports = {
   RepositorioDeHorarios,
   RepositorioDeConsultas,
   RepositorioDeEspecialidades,
+  RepositorioDeCidades,
+  RepositorioDePlanos,
   RepositorioDeProfissionais,
   RepositorioDePacientes,
   RepositorioDeDispositivos,

@@ -411,6 +411,9 @@ describe('a clínica do profissional', () => {
       nome: 'Clínica de Teste',
       telefone: null,
       endereco: null,
+      cidade: null,
+      latitude: null,
+      longitude: null,
     });
   });
 

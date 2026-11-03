@@ -122,6 +122,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run migrate` | Aplica migrations no banco de desenvolvimento |
 | `npm run migrate:teste` | Aplica migrations no banco de teste |
 | `npm run seed` | Popula dados de trabalho (idempotente). A agenda cobre os próximos 14 dias, ou o período de `--ate AAAA-MM-DD` ou `--dias N` (ver abaixo) |
+| `npm run seed:demonstracao` | Versão 2, só homologação: catálogo fictício com cidades, planos e formas de pagamento; recusa banco de produção (ver abaixo) |
 | `npm run clinica:atualizar` | Troca nome, telefone ou endereço da clínica, com confirmação (ver abaixo) |
 | `npm test` | Roda a suíte completa |
 | `npm run test:unit` | Só os testes de unidade, sem banco |
@@ -730,6 +731,67 @@ commit, arquivo, linha, tipo e o motivo. Sem essa saída, um falso positivo
 deixaria a integração contínua vermelha para sempre, porque o histórico não
 muda. A exceção precisa coincidir em tudo com o achado, e credencial de verdade
 nunca entra ali.
+
+## Versão 2 (homologação)
+
+A versão 2 ("iFood mínimo") vive só na homologação, que publica a branch
+`versao-2`: `https://agendamento-clinico-homolog.onrender.com`, com banco
+próprio. Os participantes da pesquisa usam a v1.0.0 contra a produção, que não
+recebe nada desta seção enquanto a coleta durar. Tudo aqui é aditivo: nenhum
+campo da v1 mudou.
+
+**Etapa 20: cidade, planos, formas de pagamento e próximo horário.**
+
+| Rota | O que faz |
+|---|---|
+| `GET /cidades` | `{ cidades: [{ id, nome, uf }] }`: só as cidades com profissional ativo, em ordem alfabética. Cache de 5 minutos |
+| `GET /planos` | `{ planos: [{ id, nome }] }`: só os planos aceitos por profissional ativo, em ordem alfabética. Cache de 5 minutos |
+| `GET /profissionais?cidade=&plano=` | Filtros novos, opcionais e combináveis com `especialidade` e `q`. Id inexistente devolve lista vazia; valor inválido, `DADOS_INVALIDOS` |
+
+Cada profissional do catálogo (lista e detalhe) ganha:
+
+- `clinica.cidade` (`{ id, nome, uf }` ou `null`), `clinica.latitude` e
+  `clinica.longitude` (números ou `null`, sempre juntos). A distância é
+  calculada no aparelho; a localização do paciente não chega à API;
+- `planos`: `[{ id, nome }]`, em ordem alfabética, ou `[]`;
+- `formasDePagamento`: na ordem `app`, `plano`, `clinica`, **nunca vazia**. O
+  banco exige que todo profissional aceite o aplicativo ou a clínica, e
+  "plano" vale quando há ao menos um cadastrado;
+- `proximoHorario`: `{ id, inicio }` do horário livre mais cedo que ainda não
+  começou, ou `null`. **Sempre presente** no catálogo: para o aplicativo, a
+  ausência do campo quer dizer "API da v1". É indicativo, porque a lista tem cache
+  de 5 minutos; para agendar, vale a grade.
+
+Na leitura de consultas, a clínica traz a cidade e as coordenadas, mas o
+profissional **não** traz `planos`, `formasDePagamento` nem `proximoHorario`:
+são do catálogo, e lá ficam ausentes, como na v1.
+
+Planos e próximo horário saem de subconsultas `LATERAL`, e o filtro por plano é
+um `EXISTS`. Um `JOIN` com os planos repetiria o profissional uma vez por plano,
+e o total da paginação contaria cada repetição.
+
+**O catálogo de demonstração**, para a homologação:
+
+```bash
+npm run seed -- --ate 2026-12-15
+npm run seed:demonstracao -- --ate 2026-12-15
+```
+
+- **O que ele cria:** três cidades do Ceará e duas clínicas novas, com
+  coordenadas aproximadas; quatro planos com nomes inventados; profissionais
+  fictícios. Inclui os três casos do card: Ana sem plano, Carlos com três
+  planos e Íris sem horário livre. Também varia as formas de pagamento: Heitor
+  só por plano ou na clínica, Fernanda também na clínica.
+- **A ordem importa: sempre depois do seed base.** O base cria horário para
+  todo profissional ativo, e a demonstração retira os da Íris.
+- **Ele se recusa a rodar** quando o nome do banco tem `producao` ou `coleta`,
+  antes de qualquer escrita: dado fictício nunca entra no banco da coleta.
+
+**Banco de teste local:** a migration 010 só existe na `versao-2`. Antes de
+voltar a trabalhar na `main`, desfaça-a no banco de teste
+(`node scripts/migrar.js --teste --desfazer`). Senão, o teste do `migrate` na
+`main` encontra uma migration que os arquivos dela não têm. A CI não tem esse
+problema, porque cria um banco do zero a cada execução.
 
 ## Licença
 

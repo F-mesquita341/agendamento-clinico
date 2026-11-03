@@ -35,15 +35,26 @@ describe('apresentador do profissional', () => {
       nome: 'Clínica Exemplo',
       telefone: '(88) 3000-0000',
       endereco: 'Centro, Quixadá - CE',
+      cidade: null,
+      latitude: null,
+      longitude: null,
     });
   });
 
-  test('telefone e endereço ausentes saem como null, não somem do JSON', () => {
+  test('telefone, endereço, cidade e coordenadas ausentes saem como null, não somem do JSON', () => {
     // O aplicativo decide mostrar ou esconder "Ligar" pela presença do campo:
     // a chave precisa existir mesmo vazia.
     const json = apresentar.profissional(profissionalCom({ id: 7, nome: 'Clínica Exemplo' }));
 
-    expect(json.clinica).toEqual({ id: 7, nome: 'Clínica Exemplo', telefone: null, endereco: null });
+    expect(json.clinica).toEqual({
+      id: 7,
+      nome: 'Clínica Exemplo',
+      telefone: null,
+      endereco: null,
+      cidade: null,
+      latitude: null,
+      longitude: null,
+    });
   });
 
   test('profissional montado sem clínica sai com clinica null', () => {

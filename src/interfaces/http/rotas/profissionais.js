@@ -30,6 +30,10 @@ const JANELA_MAXIMA_DIAS = 60;
 
 const filtrosDaBusca = z.object({
   especialidade: inteiroPositivo('A especialidade').optional(),
+  // Versão 2: a cidade da clínica e um plano aceito. Id que não existe não é
+  // erro — devolve lista vazia, como a especialidade.
+  cidade: inteiroPositivo('A cidade').optional(),
+  plano: inteiroPositivo('O plano').optional(),
   // `invalid_type_error` não é supérfluo: o Express transforma chaves
   // repetidas na query em array, então `?q=a&q=b` chega aqui como `['a','b']`
   // e o Zod recusaria com a mensagem padrão dele, em inglês.
@@ -54,7 +58,7 @@ const janelaDeHorarios = z.object({
   ate: data('A data final').optional(),
 });
 
-/** GET /profissionais?especialidade=&q=&pagina=&limite= */
+/** GET /profissionais?especialidade=&q=&cidade=&plano=&pagina=&limite= */
 rotas.get('/', async (req, res, next) => {
   try {
     const filtros = validar(filtrosDaBusca, req.query);
@@ -62,6 +66,8 @@ rotas.get('/', async (req, res, next) => {
     const { itens, total } = await profissionais.listar({
       especialidadeId: filtros.especialidade ?? null,
       termo: filtros.q ?? null,
+      cidadeId: filtros.cidade ?? null,
+      planoId: filtros.plano ?? null,
       limite: filtros.limite,
       deslocamento: (filtros.pagina - 1) * filtros.limite,
     });
