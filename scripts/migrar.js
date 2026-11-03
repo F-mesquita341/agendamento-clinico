@@ -19,6 +19,7 @@ const path = require('path');
 const { runner } = require('node-pg-migrate');
 const config = require('../src/config');
 const { Client, transporte } = require('../src/infra/db/driver');
+const { descreverBanco } = require('./descreverBanco');
 
 const argumentos = process.argv.slice(2);
 const noBancoDeTeste = argumentos.includes('--teste');
@@ -43,8 +44,12 @@ async function migrar() {
       : 'desenvolvimento';
   const direcao = desfazer ? 'down' : 'up';
 
+  // O rótulo vem do NODE_ENV, e o banco vem da URL: quem prepara o banco de
+  // produção pelo próprio terminal roda com o NODE_ENV do .env, e o rótulo diz
+  // "desenvolvimento". O host e o nome do banco, sem usuário nem senha, dizem
+  // onde a migration vai de fato.
   console.log(
-    `Migrations (${direcao}) no banco de ${rotulo}, via ${transporte}...`
+    `Migrations (${direcao}) no banco de ${rotulo} (${descreverBanco(url)}), via ${transporte}...`
   );
 
   const cliente = new Client({ connectionString: url });
