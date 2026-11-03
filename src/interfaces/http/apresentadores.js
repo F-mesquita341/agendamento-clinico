@@ -15,10 +15,20 @@ function especialidade(e) {
   return { id: e.id, nome: e.nome };
 }
 
+function cidade(c) {
+  return { id: c.id, nome: c.nome, uf: c.uf };
+}
+
+function plano(p) {
+  return { id: p.id, nome: p.nome };
+}
+
 /**
  * A clínica onde o profissional atende: o contato que o aplicativo mostra
  * para o paciente ligar ou chegar ao local. Lista fechada de campos — o CNPJ
- * fica de fora, porque o aplicativo não usa.
+ * fica de fora, porque o aplicativo não usa. Cidade e coordenadas saem sempre,
+ * nulas quando a clínica não as tem: as coordenadas servem para o aparelho
+ * calcular a distância, e a localização do paciente nunca vem para a API.
  */
 function clinica(c) {
   return {
@@ -26,9 +36,19 @@ function clinica(c) {
     nome: c.nome,
     telefone: c.telefone ?? null,
     endereco: c.endereco ?? null,
+    cidade: c.cidade ? cidade(c.cidade) : null,
+    latitude: c.latitude ?? null,
+    longitude: c.longitude ?? null,
   };
 }
 
+/**
+ * Planos, formas de pagamento e próximo horário saem só quando a leitura os
+ * trouxe — sempre, no catálogo (lista e detalhe); nunca, na consulta. Para o
+ * aplicativo, ausente e nulo dizem coisas diferentes: sem o campo, a API é a
+ * v1 e a linha some; com `proximoHorario: null`, o profissional não tem
+ * horário livre, e o card diz isso.
+ */
 function profissional(p) {
   return {
     id: p.id,
@@ -38,6 +58,16 @@ function profissional(p) {
     valorCentavos: p.valorConsulta.centavos,
     valorFormatado: p.valorConsulta.formatar(),
     clinica: p.clinica ? clinica(p.clinica) : null,
+    ...(p.planos !== undefined
+      ? { planos: p.planos.map(plano), formasDePagamento: p.formasDePagamento() }
+      : {}),
+    ...(p.proximoHorario !== undefined
+      ? {
+          proximoHorario: p.proximoHorario
+            ? { id: p.proximoHorario.id, inicio: p.proximoHorario.inicio.toISOString() }
+            : null,
+        }
+      : {}),
   };
 }
 
@@ -120,4 +150,13 @@ function checkout(ch, c) {
   };
 }
 
-module.exports = { especialidade, profissional, horario, paciente, consulta, checkout };
+module.exports = {
+  especialidade,
+  cidade,
+  plano,
+  profissional,
+  horario,
+  paciente,
+  consulta,
+  checkout,
+};

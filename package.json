@@ -15,6 +15,7 @@
     "migrate:teste": "node scripts/migrar.js --teste",
     "seed": "node scripts/seed.js",
     "clinica:atualizar": "node scripts/atualizar-clinica.js",
+    "seed:demonstracao": "node scripts/seed-demonstracao.js",
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
     "test:integracao": "jest tests/integration --runInBand",

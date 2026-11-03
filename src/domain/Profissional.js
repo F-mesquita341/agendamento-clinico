@@ -10,6 +10,17 @@
 
 const { Dinheiro } = require('./Dinheiro');
 
+/**
+ * As formas de pagamento, na ordem em que o aplicativo as oferece. Pagar pelo
+ * aplicativo vem primeiro porque é o fluxo original — o pagamento antecipado
+ * que é a premissa do trabalho contra as faltas.
+ */
+const FORMA_DE_PAGAMENTO = Object.freeze({
+  APP: 'app',
+  PLANO: 'plano',
+  CLINICA: 'clinica',
+});
+
 class Profissional {
   constructor({
     id,
@@ -20,12 +31,16 @@ class Profissional {
     especialidade,
     valorConsulta,
     ativo = true,
+    aceitaPagamentoNoApp = true,
+    aceitaPagarNaClinica = false,
+    planos,
+    proximoHorario,
   }) {
     this.id = id;
     this.clinicaId = clinicaId;
-    // { id, nome, telefone, endereco } — telefone e endereço podem faltar.
-    // É o contato que o paciente usa para chegar à consulta ou ligar para a
-    // clínica.
+    // { id, nome, telefone, endereco, cidade, latitude, longitude } — tudo
+    // menos id e nome pode faltar. É o contato que o paciente usa para chegar
+    // à consulta ou ligar para a clínica.
     this.clinica = clinica ?? null;
     this.nome = nome;
     this.registroConselho = registroConselho;
@@ -36,11 +51,39 @@ class Profissional {
         ? valorConsulta
         : Dinheiro.deCentavos(valorConsulta ?? 0);
     this.ativo = ativo;
+    this.aceitaPagamentoNoApp = aceitaPagamentoNoApp;
+    this.aceitaPagarNaClinica = aceitaPagarNaClinica;
+    // [{ id, nome }] — ou undefined quando a leitura não os trouxe (a leitura
+    // de consultas não traz). Undefined e lista vazia dizem coisas diferentes:
+    // "não sei" e "não aceita plano nenhum".
+    this.planos = planos;
+    // { id, inicio } do horário livre mais cedo; null quando não há nenhum;
+    // undefined quando a leitura não o calculou.
+    this.proximoHorario = proximoHorario;
   }
 
   atende() {
     return this.ativo === true;
   }
+
+  /**
+   * As formas de pagamento que este profissional aceita, na ordem fixa
+   * app → plano → clínica. "Plano" vale quando há ao menos um cadastrado.
+   * Nunca sai vazia: o banco exige que todo profissional aceite ao menos o
+   * aplicativo ou a clínica (migration 010).
+   *
+   * Sem a lista de planos lida, o plano fica de fora — não dá para afirmar
+   * que o profissional aceita plano sem saber quais.
+   */
+  formasDePagamento() {
+    const formas = [];
+    if (this.aceitaPagamentoNoApp) formas.push(FORMA_DE_PAGAMENTO.APP);
+    if (Array.isArray(this.planos) && this.planos.length > 0) {
+      formas.push(FORMA_DE_PAGAMENTO.PLANO);
+    }
+    if (this.aceitaPagarNaClinica) formas.push(FORMA_DE_PAGAMENTO.CLINICA);
+    return formas;
+  }
 }
 
-module.exports = { Profissional };
+module.exports = { Profissional, FORMA_DE_PAGAMENTO };

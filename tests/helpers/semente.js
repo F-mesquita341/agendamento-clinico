@@ -18,7 +18,8 @@ const { VERSAO_TERMO_CONSENTIMENTO } = require('../../src/domain/Paciente');
 async function limpar() {
   await consultar(`
     TRUNCATE auditoria, pagamento, dispositivo, consulta, horario,
-             profissional, especialidade, paciente, clinica
+             profissional_plano, plano_de_saude,
+             profissional, especialidade, paciente, clinica, cidade
     RESTART IDENTITY CASCADE;
   `);
 }
