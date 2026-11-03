@@ -475,8 +475,8 @@ describe('PATCH /consultas/:id/cancelamento', () => {
     // trava existe justamente para quando ela NÃO pega, que é o caso em que as
     // duas requisições leem o estado antes de qualquer uma gravar.
     const resultados = await Promise.allSettled([
-      consultasPg.cancelar(consulta.id),
-      consultasPg.cancelar(consulta.id),
+      consultasPg.cancelar(consulta.id, new Date()),
+      consultasPg.cancelar(consulta.id, new Date()),
     ]);
 
     const recusados = resultados.filter((r) => r.status === 'rejected');
@@ -506,6 +506,59 @@ describe('PATCH /consultas/:id/cancelamento', () => {
       versao: 1,
     });
     expect(await contarConsultas("status = 'pendente_pagamento'")).toBe(1);
+  });
+
+  test('consulta paga que já começou é recusada com 422, e nada muda', async () => {
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+    // Paga, e com o horário começando meia hora atrás.
+    await consultar(`UPDATE consulta SET status = 'confirmada' WHERE id = $1`, [consulta.id]);
+    await consultar(
+      `UPDATE horario SET inicio = now() - INTERVAL '30 minutes', fim = now() WHERE id = $1`,
+      [dados.horarios.amanha]
+    );
+
+    const r = await cancelar(comoA, consulta.id);
+
+    expect(r.status).toBe(422);
+    expect(r.body.erro).toMatchObject({ codigo: 'CONSULTA_JA_INICIADA', acao: null });
+    expect(r.body.erro.mensagem).toMatch(/Fale com a clínica/);
+    expect((await consultasPg.porId(consulta.id)).status).toBe('confirmada');
+    expect((await horarioNoBanco(dados.horarios.amanha)).status).toBe('reservado');
+    expect(await contarConsultas(`status = 'cancelada'`)).toBe(0);
+  });
+
+  test('a trava do adaptador também recusa a consulta que já começou', async () => {
+    // Direto no adaptador: é a checagem sob bloqueio, para quando a do caso de
+    // uso passou e o horário começou antes da escrita.
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+    await consultar(`UPDATE consulta SET status = 'confirmada' WHERE id = $1`, [consulta.id]);
+    const { rows } = await consultar('SELECT inicio FROM horario WHERE id = $1', [
+      dados.horarios.amanha,
+    ]);
+
+    await expect(consultasPg.cancelar(consulta.id, rows[0].inicio)).rejects.toMatchObject({
+      codigo: 'CONSULTA_JA_INICIADA',
+    });
+    expect((await consultasPg.porId(consulta.id)).status).toBe('confirmada');
+  });
+
+  test('reserva vencida é recusada com RESERVA_EXPIRADA, e a rotina continua expirando', async () => {
+    const consulta = await agendado(comoA, dados.horarios.amanha, 0);
+    await consultar(
+      `UPDATE consulta SET reserva_expira_em = now() - INTERVAL '1 minute' WHERE id = $1`,
+      [consulta.id]
+    );
+
+    const r = await cancelar(comoA, consulta.id);
+
+    expect(r.status).toBe(422);
+    expect(r.body.erro).toMatchObject({ codigo: 'RESERVA_EXPIRADA', acao: null });
+    expect((await consultasPg.porId(consulta.id)).status).toBe('pendente_pagamento');
+
+    // A decisão fica com a rotina, que devolve o horário como sempre.
+    expect(await consultasPg.expirarSeVencida(consulta.id, new Date())).toBe(true);
+    expect((await consultasPg.porId(consulta.id)).motivoCancelamento).toBe('reserva_expirada');
+    expect((await horarioNoBanco(dados.horarios.amanha)).status).toBe('disponivel');
   });
 
   test('o cancelamento gera auditoria', async () => {
@@ -545,7 +598,7 @@ describe('consulta não encontrada', () => {
   });
 
   test('no adaptador, quando a consulta some antes da trava', async () => {
-    await expect(consultasPg.cancelar(999999)).rejects.toMatchObject({
+    await expect(consultasPg.cancelar(999999, new Date())).rejects.toMatchObject({
       codigo: 'NAO_ENCONTRADO',
       message: MENSAGEM,
     });

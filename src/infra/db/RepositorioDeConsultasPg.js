@@ -149,16 +149,22 @@ class RepositorioDeConsultasPg extends RepositorioDeConsultas {
    * horário primeiro, mas só consegue travá-lo quando ele está disponível —
    * situação em que não há consulta ativa para disputar.
    */
-  async cancelar(consultaId) {
+  async cancelar(consultaId, agora) {
     return transacao(async (cliente) => {
       const consulta = await lerSobBloqueio(cliente, consultaId);
       if (!consulta) {
         throw new NaoEncontrado('Consulta', { feminino: true });
       }
 
+      // O início mora no horário e não muda depois de criado: dispensa
+      // bloqueio próprio.
+      const { rows } = await cliente.query('SELECT inicio FROM horario WHERE id = $1', [
+        consulta.horarioId,
+      ]);
+
       // Relido sob bloqueio: entre a verificação do caso de uso e este ponto o
       // estado pode ter mudado. Quem decide continua sendo o domínio.
-      consulta.garantirQuePodeSerCancelada();
+      consulta.garantirQuePodeSerCancelada({ agora, inicioDoHorario: rows[0]?.inicio });
 
       return cancelarSobBloqueio(cliente, consulta, {
         motivo: MOTIVO_CANCELAMENTO.PACIENTE,

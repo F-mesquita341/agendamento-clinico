@@ -182,7 +182,7 @@ class ConsultasFalsas extends RepositorioDeConsultas {
     });
   }
 
-  async cancelar(consultaId) {
+  async cancelar(consultaId, agora) {
     const consulta = this.itens.get(String(consultaId));
     // O adaptador real lê a consulta sob `FOR UPDATE` e deixa o domínio decidir
     // antes de escrever. Sem repetir isso aqui, o dublê aceitaria cancelar duas
@@ -190,7 +190,8 @@ class ConsultasFalsas extends RepositorioDeConsultas {
     if (!consulta) {
       throw new NaoEncontrado('Consulta');
     }
-    consulta.garantirQuePodeSerCancelada();
+    const inicioDoHorario = this.horarioDaConsulta.get(String(consulta.id))?.inicio;
+    consulta.garantirQuePodeSerCancelada({ agora, inicioDoHorario });
     await this.cancelarComMotivo(consulta, MOTIVO_CANCELAMENTO.PACIENTE);
     return consulta;
   }

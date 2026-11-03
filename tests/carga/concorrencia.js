@@ -428,7 +428,7 @@ async function rodadaDesatualizada(numero, contexto) {
     pacienteId: pacientes[0].id,
     reservaExpiraEm: new Date(Date.now() + config.RESERVA_MINUTOS * 60_000),
   });
-  await new RepositorioDeConsultasPg().cancelar(reserva.id);
+  await new RepositorioDeConsultasPg().cancelar(reserva.id, new Date());
 
   const antes = await insercoesConsumidas(sequencia);
   const { respostas, duracaoMs, janelaDeChegadaMs } = await rajadaHttp(contexto, horarioId, 0);

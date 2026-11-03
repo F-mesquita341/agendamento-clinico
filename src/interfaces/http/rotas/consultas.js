@@ -106,7 +106,7 @@ function criarRotasDeConsultas({
     reservaMinutos: config.RESERVA_MINUTOS,
     ...comRelogio,
   });
-  const cancelar = new CancelarConsulta({ consultas });
+  const cancelar = new CancelarConsulta({ consultas, horarios, ...comRelogio });
   const iniciarPagamento = new IniciarPagamento({ consultas, pagamentos, gateway, ...comRelogio });
 
   rotas.use(semCache);

@@ -270,6 +270,17 @@ histórico, que é a matéria-prima da análise de absenteísmo. O horário volt
 `disponivel` com a versão incrementada de novo — quem ainda tiver a versão
 anterior em mãos precisa recarregar a grade.
 
+Cancelar pelo aplicativo tem dois limites de tempo, conferidos também sob o
+bloqueio da consulta:
+
+- **Consulta paga que já começou não se cancela.** A devolução integral vale só
+  antes do horário. Depois dele, quem faltou continua como falta: se pudesse
+  cancelar, a falta viraria "cancelada pelo paciente" nos dados da pesquisa. O
+  caminho é falar com a clínica.
+- **Reserva vencida também não.** Ela está com a rotina de expiração, que
+  pergunta ao Mercado Pago antes de devolver o horário — o pagamento pode ter
+  sido aprovado e o aviso, perdido. A recusa é a mesma do pagamento.
+
 | Código | Ação indicada | Quando |
 |---|---|---|
 | `HORARIO_INDISPONIVEL` (409) | `recarregar_horarios` | Outra pessoa reservou o horário primeiro |
@@ -277,6 +288,8 @@ anterior em mãos precisa recarregar a grade.
 | `HORARIO_NO_PASSADO` (422) | — | O horário já começou |
 | `PROFISSIONAL_INDISPONIVEL` (422) | — | O profissional foi desativado |
 | `CONSULTA_JA_CANCELADA` (422) | — | Cancelamento repetido |
+| `CONSULTA_JA_INICIADA` (422) | — | Cancelar consulta paga cujo horário já começou |
+| `RESERVA_EXPIRADA` (422) | — | Cancelar (ou pagar) reserva cujo prazo passou |
 | `NAO_ENCONTRADO` (404) | — | A consulta não existe **ou pertence a outro paciente** |
 
 Consulta de outro paciente responde exatamente como consulta inexistente. Um
