@@ -9,9 +9,18 @@
  * sessões de teste com participantes, troque pelos dados reais da clínica
  * parceira — buscar por um profissional inventado não mede reconhecimento
  * nem familiaridade, que é justamente o que as sessões precisam observar.
+ * Os dados da clínica se trocam com `npm run clinica:atualizar`.
+ *
+ * Período da agenda: os próximos 14 dias, ou o que vier em `--ate AAAA-MM-DD`
+ * ou `--dias N` (ver periodoDoSeed.js):
+ *
+ *   npm run seed -- --ate 2026-12-15
  */
 
+const config = require('../src/config');
 const { consultar, encerrar } = require('../src/infra/db/pool');
+const { descreverBanco } = require('./descreverBanco');
+const { lerPeriodo, PeriodoInvalido } = require('./periodoDoSeed');
 
 const ESPECIALIDADES = [
   'Clínica Geral',
@@ -30,8 +39,8 @@ const PROFISSIONAIS = [
   ['Fernanda Alencar Sá', 'CRM-CE 56789', 'Pediatria', 18000],
 ];
 
-async function semear() {
-  console.log('Semeando...');
+async function semear({ hoje, ultimoDia }) {
+  console.log(`Semeando ${descreverBanco(config.urlDoBanco)}, horários até ${ultimoDia}...`);
 
   await consultar(`
     INSERT INTO clinica (nome, cnpj, telefone, endereco)
@@ -68,9 +77,12 @@ async function semear() {
     console.log(`  ${jaTem[0].n} profissionais já existiam`);
   }
 
-  // Agenda dos próximos 14 dias: seg a sex, 08:00–11:30 e 14:00–17:30,
-  // em blocos de 30 minutos, no fuso de Fortaleza.
-  const { rowCount: horariosCriados } = await consultar(`
+  // Agenda de amanhã até o último dia do período, inclusive: seg a sex,
+  // 08:00–11:30 e 14:00–17:30, em blocos de 30 minutos, no fuso de Fortaleza.
+  // As duas datas vêm de periodoDoSeed.js, já no fuso da clínica. Horário que
+  // já existe fica como está — reservado ou não —, e consulta não é tocada.
+  const { rowCount: horariosCriados } = await consultar(
+    `
     INSERT INTO horario (profissional_id, inicio, fim)
     SELECT p.id,
            (s.momento AT TIME ZONE 'America/Fortaleza'),
@@ -79,10 +91,8 @@ async function semear() {
       CROSS JOIN LATERAL (
         SELECT gs AS momento
           FROM generate_series(
-                 (date_trunc('day', (now() AT TIME ZONE 'America/Fortaleza'))
-                   + INTERVAL '1 day')::timestamp,
-                 (date_trunc('day', (now() AT TIME ZONE 'America/Fortaleza'))
-                   + INTERVAL '14 days')::timestamp,
+                 ($1::date + 1)::timestamp,
+                 ($2::date + 1)::timestamp,
                  INTERVAL '30 minutes'
                ) gs
          WHERE EXTRACT(dow FROM gs) BETWEEN 1 AND 5
@@ -93,7 +103,9 @@ async function semear() {
       ) s
      WHERE p.ativo
     ON CONFLICT (profissional_id, inicio) DO NOTHING;
-  `);
+  `,
+    [hoje, ultimoDia]
+  );
   console.log(`  ${horariosCriados} horários criados`);
 
   const { rows: resumo } = await consultar(`
@@ -105,9 +117,24 @@ async function semear() {
   console.log('Pronto:', resumo[0]);
 }
 
-semear()
-  .catch((erro) => {
+async function principal() {
+  let periodo;
+  try {
+    // Antes de qualquer escrita: argumento errado não deixa meia agenda.
+    periodo = lerPeriodo(process.argv.slice(2));
+  } catch (erro) {
+    if (!(erro instanceof PeriodoInvalido)) throw erro;
+    console.error(`\n${erro.message}\nNada foi escrito.\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    await semear(periodo);
+  } catch (erro) {
     console.error('Falha ao semear:', erro.message);
     process.exitCode = 1;
-  })
-  .finally(encerrar);
+  }
+}
+
+principal().finally(encerrar);

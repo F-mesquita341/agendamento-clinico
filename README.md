@@ -121,7 +121,8 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm start` | Sobe a API |
 | `npm run migrate` | Aplica migrations no banco de desenvolvimento |
 | `npm run migrate:teste` | Aplica migrations no banco de teste |
-| `npm run seed` | Popula dados de trabalho (idempotente) |
+| `npm run seed` | Popula dados de trabalho (idempotente). A agenda cobre os próximos 14 dias, ou o período de `--ate AAAA-MM-DD` ou `--dias N` (ver abaixo) |
+| `npm run clinica:atualizar` | Troca nome, telefone ou endereço da clínica, com confirmação (ver abaixo) |
 | `npm test` | Roda a suíte completa |
 | `npm run test:unit` | Só os testes de unidade, sem banco |
 | `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
@@ -131,6 +132,44 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
 | `npm run exportar:pesquisa` | Conjunto de dados da pesquisa, pseudonimizado, numa pasta fora do repositório (ver abaixo) |
 | `npm run auditar:historico` | Procura credenciais em todo o histórico do Git, sem nunca mostrar o valor (ver abaixo) |
+
+### Seed e dados da clínica em produção
+
+O seed só acrescenta: horário que já existe fica como está, reservado ou não,
+e consulta não é tocada. Uma rodada pode cobrir a coleta inteira:
+
+```bash
+npm run seed -- --ate 2026-12-15
+```
+
+Os horários vão de amanhã até o dia informado, de segunda a sexta, das 08:00
+às 11:30 e das 14:00 às 17:30, no fuso da clínica. Data inválida, no passado ou
+a mais de 120 dias é recusada antes de qualquer escrita.
+
+Os dados da clínica (nome, telefone, endereço) não se trocam pelo seed, que
+nunca sobrescreve a clínica existente. Para pôr os da clínica parceira:
+
+```bash
+npm run clinica:atualizar -- --nome "…" --telefone "…" --endereco "…"
+```
+
+Só os campos informados mudam. O script mostra o host e o nome do banco, a
+linha atual e a nova, e só grava depois de um `s`. Ele não trava nada enquanto
+espera: o `UPDATE` só vale se a linha ainda for a que foi mostrada.
+
+Os dois usam o banco de `DATABASE_URL`. Para o de produção, defina-a no seu
+terminal antes, sem que ela apareça na tela nem no histórico:
+
+```powershell
+$s = Read-Host -AsSecureString "DATABASE_URL de producao"
+$env:DATABASE_URL = [System.Net.NetworkCredential]::new('', $s).Password
+$env:DATABASE_URL -match '/agendamento_producao'   # True: é a de produção
+$env:TRANSPORTE_BANCO = 'websocket'; npm run seed -- --ate 2026-12-15
+Remove-Item Env:DATABASE_URL; Remove-Variable s
+```
+
+Sem a variável, o script cai em silêncio no banco de desenvolvimento do `.env`
+— por isso a conferência do `-match` antes de rodar.
 
 ## Convenções da API
 

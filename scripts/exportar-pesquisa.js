@@ -39,6 +39,7 @@ const path = require('node:path');
 
 const config = require('../src/config');
 const { transacao, encerrar } = require('../src/infra/db/pool');
+const { descreverBanco } = require('./descreverBanco');
 const {
   COLUNAS_DE_CONSULTAS,
   COLUNAS_DE_EVENTOS,
@@ -108,16 +109,6 @@ function caminhoReal(alvo) {
     existente = pai;
   }
   return path.join(fs.realpathSync.native(existente), ...faltando);
-}
-
-/** Host e nome do banco, sem usuário nem senha. */
-function descreverBanco(url) {
-  try {
-    const endereco = new URL(url);
-    return `${endereco.hostname}${endereco.pathname}`;
-  } catch {
-    return '(endereço do banco ilegível)';
-  }
 }
 
 /**
