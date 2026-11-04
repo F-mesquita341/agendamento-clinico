@@ -11,6 +11,7 @@
 const { RepositorioDeHorarios } = require('../../domain/repositorios');
 const { Horario } = require('../../domain/Horario');
 const { RegraDeNegocio, ConsultaSobreposta } = require('../../domain/erros');
+const { FORMA_DE_PAGAMENTO, garantirQueAceita } = require('../../domain/formasDePagamento');
 const { consultar, transacao } = require('./pool');
 const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 
@@ -62,7 +63,14 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
    * @returns {Promise<import('../../domain/Consulta').Consulta|null>} `null`
    *          quando a versão não conferia: outra pessoa chegou antes.
    */
-  async reservarEAgendar({ horarioId, versao, pacienteId, reservaExpiraEm }) {
+  async reservarEAgendar({
+    horarioId,
+    versao,
+    pacienteId,
+    reservaExpiraEm,
+    formaDePagamento = FORMA_DE_PAGAMENTO.APP,
+    planoId = null,
+  }) {
     return transacao(async (cliente) => {
       // A reserva e a leitura do profissional numa ida só ao banco. Esta
       // transação segura o bloqueio da linha do horário, e cada ida a menos é
@@ -86,10 +94,17 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
             WHERE id = $1 AND versao = $2 AND status = 'disponivel'
             RETURNING profissional_id, versao, inicio, fim
          )
-         SELECT r.versao, r.inicio, r.fim, p.valor_consulta_centavos, p.ativo
+         SELECT r.versao, r.inicio, r.fim, p.valor_consulta_centavos, p.ativo,
+                -- Versão 2: o que o profissional aceita, lido na mesma ida ao
+                -- banco e sob o mesmo bloqueio da reserva.
+                p.aceita_pagamento_no_app, p.aceita_pagar_na_clinica,
+                EXISTS (
+                  SELECT 1 FROM profissional_plano pp
+                   WHERE pp.profissional_id = p.id AND pp.plano_id = $3
+                ) AS aceita_o_plano
            FROM reservado r
            LEFT JOIN profissional p ON p.id = r.profissional_id`,
-        [horarioId, versao]
+        [horarioId, versao, planoId]
       );
 
       if (reserva.rowCount === 0) {
@@ -102,6 +117,9 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
         fim,
         valor_consulta_centavos: valorCentavos,
         ativo,
+        aceita_pagamento_no_app: aceitaPagamentoNoApp,
+        aceita_pagar_na_clinica: aceitaPagarNaClinica,
+        aceita_o_plano: aceitaOPlano,
       } = reserva.rows[0];
 
       // Desativar um profissional tira os horários dele das listagens, mas um
@@ -114,22 +132,40 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
         );
       }
 
+      // Versão 2: a forma escolhida é aceita? Quem decide é o domínio; a
+      // recusa desfaz a reserva (ROLLBACK), como a do profissional inativo.
+      garantirQueAceita({
+        forma: formaDePagamento,
+        aceitaPagamentoNoApp,
+        aceitaPagarNaClinica,
+        aceitaOPlano,
+      });
+
+      // Pelo aplicativo, a consulta espera o pagamento com prazo de reserva;
+      // com plano ou na clínica, nasce confirmada e sem prazo — o banco também
+      // exige isso (migration 011).
+      const pelaApp = formaDePagamento === FORMA_DE_PAGAMENTO.APP;
+
       let linha;
       try {
         const { rows } = await cliente.query(
           `INSERT INTO consulta
-             (paciente_id, horario_id, status, valor_centavos, reserva_expira_em, periodo)
-           VALUES ($1, $2, 'pendente_pagamento', $3, $4, tstzrange($5, $6, '[)'))
+             (paciente_id, horario_id, status, valor_centavos, reserva_expira_em, periodo,
+              forma_de_pagamento, plano_id)
+           VALUES ($1, $2, $7, $3, $4, tstzrange($5, $6, '[)'), $8, $9)
            RETURNING ${COLUNAS_DA_CONSULTA}`,
           [
             pacienteId,
             horarioId,
             valorCentavos,
-            reservaExpiraEm,
+            pelaApp ? reservaExpiraEm : null,
             // O período é copiado do horário reservado logo acima, e congela a
             // duração combinada junto com o preço.
             inicio,
             fim,
+            pelaApp ? 'pendente_pagamento' : 'confirmada',
+            formaDePagamento,
+            formaDePagamento === FORMA_DE_PAGAMENTO.PLANO ? planoId : null,
           ]
         );
         linha = rows[0];
@@ -157,9 +193,14 @@ class RepositorioDeHorariosPg extends RepositorioDeHorarios {
       await cliente.query(
         `INSERT INTO auditoria (ator_tipo, ator_id, acao, entidade, entidade_id, detalhe)
          VALUES ('paciente', $1, 'consulta.criada', 'consulta', $2, $3)`,
-        // Só identificadores e a versão resultante. Especialidade, nome do
-        // profissional e motivo da consulta são dado de saúde e não entram aqui.
-        [pacienteId, linha.id, { horarioId: Number(horarioId), versaoDoHorario: versaoNova }]
+        // Só identificadores, a versão resultante e a forma de pagamento.
+        // Especialidade, nome do profissional e motivo da consulta são dado de
+        // saúde e não entram aqui; o plano escolhido também não.
+        [
+          pacienteId,
+          linha.id,
+          { horarioId: Number(horarioId), versaoDoHorario: versaoNova, formaDePagamento },
+        ]
       );
 
       return paraConsulta(linha);

@@ -24,6 +24,7 @@
 const { Consulta, STATUS_CONSULTA, MOTIVO_CANCELAMENTO } = require('../../src/domain/Consulta');
 const { Horario, STATUS_HORARIO } = require('../../src/domain/Horario');
 const { Dinheiro } = require('../../src/domain/Dinheiro');
+const { FORMA_DE_PAGAMENTO, garantirQueAceita } = require('../../src/domain/formasDePagamento');
 const { Paciente } = require('../../src/domain/Paciente');
 const { NaoEncontrado, PacienteJaCadastrado } = require('../../src/domain/erros');
 const {
@@ -47,11 +48,24 @@ class HorariosFalsos extends RepositorioDeHorarios {
     this.precos = precos;
     this.consultas = null; // ligado por criarRepositorios()
     this.proximoIdConsulta = 1;
+    // Versão 2: o que cada profissional aceita — espelha as colunas
+    // aceita_pagamento_no_app e aceita_pagar_na_clinica e a tabela
+    // profissional_plano. Sem configuração, o padrão do banco: só o app.
+    this.aceitacao = new Map();
   }
 
   /** Mesma leitura que o adaptador real faz, dentro da transação. */
   precoDoProfissional(profissionalId) {
     return this.precos[String(profissionalId)] ?? PRECO_PADRAO;
+  }
+
+  /** @param {{app?: boolean, clinica?: boolean, planos?: number[]}} config */
+  definirAceitacao(profissionalId, { app = true, clinica = false, planos = [] } = {}) {
+    this.aceitacao.set(String(profissionalId), { app, clinica, planos });
+  }
+
+  aceitacaoDo(profissionalId) {
+    return this.aceitacao.get(String(profissionalId)) ?? { app: true, clinica: false, planos: [] };
   }
 
   async porId(id) {
@@ -71,7 +85,14 @@ class HorariosFalsos extends RepositorioDeHorarios {
     );
   }
 
-  async reservarEAgendar({ horarioId, versao, pacienteId, reservaExpiraEm }) {
+  async reservarEAgendar({
+    horarioId,
+    versao,
+    pacienteId,
+    reservaExpiraEm,
+    formaDePagamento = FORMA_DE_PAGAMENTO.APP,
+    planoId = null,
+  }) {
     const horario = this.horarios.get(String(horarioId));
 
     // Exatamente a condição do UPDATE:
@@ -80,6 +101,18 @@ class HorariosFalsos extends RepositorioDeHorarios {
       return null;
     }
 
+    // A mesma regra que o adaptador aplica dentro da transação. Aqui ela vem
+    // ANTES de marcar o horário, porque não há ROLLBACK em memória: a recusa
+    // precisa deixar o horário como estava, como o banco deixa.
+    const aceita = this.aceitacaoDo(horario.profissionalId);
+    garantirQueAceita({
+      forma: formaDePagamento,
+      aceitaPagamentoNoApp: aceita.app,
+      aceitaPagarNaClinica: aceita.clinica,
+      aceitaOPlano: planoId != null && aceita.planos.map(String).includes(String(planoId)),
+    });
+    const pelaApp = formaDePagamento === FORMA_DE_PAGAMENTO.APP;
+
     horario.status = STATUS_HORARIO.RESERVADO;
     horario.versao += 1;
 
@@ -87,11 +120,14 @@ class HorariosFalsos extends RepositorioDeHorarios {
       id: this.proximoIdConsulta++,
       pacienteId,
       horarioId: horario.id,
-      status: STATUS_CONSULTA.PENDENTE_PAGAMENTO,
+      status: pelaApp ? STATUS_CONSULTA.PENDENTE_PAGAMENTO : STATUS_CONSULTA.CONFIRMADA,
       // O adaptador é quem determina o valor, lendo o profissional.
       valor: Dinheiro.deCentavos(this.precoDoProfissional(horario.profissionalId)),
-      reservaExpiraEm,
+      reservaExpiraEm: pelaApp ? reservaExpiraEm : null,
       criadoEm: new Date(),
+      formaDePagamento,
+      // O dublê não conhece o nome do plano; o adaptador o lê do banco.
+      plano: formaDePagamento === FORMA_DE_PAGAMENTO.PLANO ? { id: Number(planoId), nome: null } : null,
     });
 
     this.consultas?.registrar(consulta, horario);

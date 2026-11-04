@@ -47,14 +47,21 @@ class RepositorioDeHorarios {
    *     — versão desatualizada, ou a rede de segurança do banco recusando uma
    *     segunda consulta ativa no mesmo horário;
    *   - exceção de domínio quando o pedido é inadmissível por outra razão:
-   *     profissional desativado, ou consulta sobreposta na agenda do paciente,
-   *     recusada pela restrição `consulta_sem_sobreposicao` (migration 007).
+   *     profissional desativado, consulta sobreposta na agenda do paciente,
+   *     recusada pela restrição `consulta_sem_sobreposicao` (migration 007),
+   *     ou forma de pagamento que o profissional não aceita (versão 2).
+   *     Em todas, a reserva é desfeita.
+   *
+   * Versão 2: com plano ou na clínica, a consulta nasce confirmada, sem prazo
+   * de reserva; pelo aplicativo, como sempre, espera o pagamento.
    *
    * @param {object} dados
    * @param {number|string} dados.horarioId
    * @param {number} dados.versao versão lida pelo cliente
    * @param {number|string} dados.pacienteId
-   * @param {Date} dados.reservaExpiraEm
+   * @param {Date|null} dados.reservaExpiraEm nulo fora do pagamento pelo app
+   * @param {string} [dados.formaDePagamento] 'app' (padrão), 'plano' ou 'clinica'
+   * @param {number} [dados.planoId] só com 'plano'
    * @returns {Promise<import('./Consulta').Consulta|null>}
    */
   async reservarEAgendar(_dados) {

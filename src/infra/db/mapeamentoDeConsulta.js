@@ -12,9 +12,14 @@
 
 const { Consulta } = require('../../domain/Consulta');
 
+// O nome do plano vem por subconsulta escalar, e não por JOIN: estas colunas
+// servem a SELECT, a SELECT ... FOR UPDATE e a RETURNING, e só uma expressão
+// por coluna funciona nos três.
 const COLUNAS_DA_CONSULTA = `
   id, paciente_id, horario_id, status, valor_centavos,
-  reserva_expira_em, lembrete_enviado_em, criado_em, motivo_cancelamento
+  reserva_expira_em, lembrete_enviado_em, criado_em, motivo_cancelamento,
+  forma_de_pagamento, plano_id,
+  (SELECT pds.nome FROM plano_de_saude pds WHERE pds.id = plano_id) AS plano_nome
 `;
 
 function paraConsulta(linha) {
@@ -29,6 +34,9 @@ function paraConsulta(linha) {
     lembreteEnviadoEm: linha.lembrete_enviado_em,
     criadoEm: linha.criado_em,
     motivoCancelamento: linha.motivo_cancelamento ?? null,
+    formaDePagamento: linha.forma_de_pagamento ?? 'app',
+    plano:
+      linha.plano_id == null ? null : { id: Number(linha.plano_id), nome: linha.plano_nome },
   });
 }
 

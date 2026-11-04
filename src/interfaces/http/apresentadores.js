@@ -128,6 +128,10 @@ function consulta(c, { horario: h, profissional: p } = {}) {
     valorFormatado: c.valor.formatar(),
     reservaExpiraEm: c.reservaExpiraEm ? c.reservaExpiraEm.toISOString() : null,
     criadoEm: c.criadoEm ? c.criadoEm.toISOString() : null,
+    // Versão 2: sempre presentes. Com plano ou na clínica, a consulta nasce
+    // confirmada e reservaExpiraEm vem nulo — não há checkout a esperar.
+    formaDePagamento: c.formaDePagamento,
+    plano: c.plano ? plano(c.plano) : null,
     ...(h ? { horario: horario(h) } : {}),
     ...(p ? { profissional: profissional(p) } : {}),
   };

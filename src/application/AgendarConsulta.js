@@ -27,6 +27,7 @@ const {
   ConsultaSobreposta,
 } = require('../domain/erros');
 const { relogioDoSistema } = require('../domain/Relogio');
+const { FORMA_DE_PAGAMENTO, FORMAS } = require('../domain/formasDePagamento');
 
 class AgendarConsulta {
   /**
@@ -43,11 +44,35 @@ class AgendarConsulta {
     this.reservaMinutos = reservaMinutos;
   }
 
-  async executar({ pacienteId, horarioId, versao }) {
+  /**
+   * @param {object} pedido
+   * @param {string} [pedido.formaDePagamento] versão 2: 'app' (padrão),
+   *        'plano' ou 'clinica'. Se o profissional aceita a forma, quem
+   *        confere é o repositório, dentro da transação da reserva.
+   * @param {number} [pedido.planoId] só com a forma 'plano'
+   */
+  async executar({
+    pacienteId,
+    horarioId,
+    versao,
+    formaDePagamento = FORMA_DE_PAGAMENTO.APP,
+    planoId = null,
+  }) {
     if (pacienteId == null || horarioId == null) {
       throw new RegraDeNegocio(
         'DADOS_INCOMPLETOS',
         'Informe o paciente e o horário desejado.'
+      );
+    }
+    // A fronteira HTTP já recusa estas combinações com a lista de campos;
+    // aqui é a guarda de quem chamar o caso de uso por outro caminho.
+    if (!FORMAS.includes(formaDePagamento)) {
+      throw new RegraDeNegocio('DADOS_INCOMPLETOS', 'Forma de pagamento desconhecida.');
+    }
+    if ((formaDePagamento === FORMA_DE_PAGAMENTO.PLANO) !== (planoId != null)) {
+      throw new RegraDeNegocio(
+        'DADOS_INCOMPLETOS',
+        'O plano é informado só, e sempre, quando a forma de pagamento é o plano.'
       );
     }
     if (!Number.isInteger(versao)) {
@@ -83,7 +108,12 @@ class AgendarConsulta {
       throw new ConsultaSobreposta();
     }
 
-    const expiraEm = new Date(agora.getTime() + this.reservaMinutos * 60_000);
+    // Só o pagamento pelo aplicativo tem prazo de reserva: plano e clínica
+    // nascem confirmados.
+    const expiraEm =
+      formaDePagamento === FORMA_DE_PAGAMENTO.APP
+        ? new Date(agora.getTime() + this.reservaMinutos * 60_000)
+        : null;
 
     // O valor NÃO é informado aqui: ele é lido do profissional pelo adaptador,
     // dentro da mesma transação, e gravado na consulta. Duas razões — o preço
@@ -94,6 +124,8 @@ class AgendarConsulta {
       versao,
       pacienteId,
       reservaExpiraEm: expiraEm,
+      formaDePagamento,
+      planoId,
     });
 
     // null significa que o UPDATE não afetou nenhuma linha: entre a leitura da

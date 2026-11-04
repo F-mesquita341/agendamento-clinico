@@ -17,6 +17,7 @@
 
 const { AcessoNegado, RegraDeNegocio } = require('./erros');
 const { Dinheiro } = require('./Dinheiro');
+const { FORMA_DE_PAGAMENTO } = require('./formasDePagamento');
 
 const STATUS = Object.freeze({
   PENDENTE_PAGAMENTO: 'pendente_pagamento',
@@ -58,6 +59,8 @@ class Consulta {
     lembreteEnviadoEm,
     criadoEm,
     motivoCancelamento = null,
+    formaDePagamento = FORMA_DE_PAGAMENTO.APP,
+    plano = null,
   }) {
     this.id = id;
     this.pacienteId = pacienteId;
@@ -68,6 +71,15 @@ class Consulta {
     this.lembreteEnviadoEm = lembreteEnviadoEm ? new Date(lembreteEnviadoEm) : null;
     this.criadoEm = criadoEm ? new Date(criadoEm) : null;
     this.motivoCancelamento = motivoCancelamento;
+    // Versão 2: 'app' (o fluxo de sempre), 'plano' ou 'clinica'. Plano e
+    // clínica nascem confirmados, sem reserva nem checkout.
+    this.formaDePagamento = formaDePagamento;
+    // { id, nome } — só com a forma 'plano'.
+    this.plano = plano;
+  }
+
+  pagaPeloAplicativo() {
+    return this.formaDePagamento === FORMA_DE_PAGAMENTO.APP;
   }
 
   /** Ativa = ocupa o horário. Tudo menos cancelada. */
@@ -128,6 +140,11 @@ class Consulta {
   garantirQuePodeSerPagaPor(pacienteId, agora) {
     if (!this.pertenceAo(pacienteId)) {
       throw new AcessoNegado('Esta consulta pertence a outro paciente.');
+    }
+    // Antes da checagem do estado: uma consulta de plano nasce confirmada, e
+    // "já está paga" seria mentira — ela simplesmente não se paga por aqui.
+    if (!this.pagaPeloAplicativo()) {
+      throw new RegraDeNegocio('CONSULTA_NAO_PAGAVEL', 'Esta consulta não é paga pelo aplicativo.');
     }
     if (!this.aguardandoPagamento()) {
       throw new RegraDeNegocio(

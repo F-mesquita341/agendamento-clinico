@@ -30,6 +30,7 @@ const { paraProfissional } = require('./RepositorioDeProfissionaisPg');
 const COLUNAS_DA_LEITURA = `
   c.id, c.paciente_id, c.horario_id, c.status, c.valor_centavos,
   c.reserva_expira_em, c.lembrete_enviado_em, c.criado_em, c.motivo_cancelamento,
+  c.forma_de_pagamento, c.plano_id, pdc.nome AS plano_nome,
 
   h.id AS h_id, h.profissional_id AS h_profissional_id,
   h.inicio AS h_inicio, h.fim AS h_fim,
@@ -56,6 +57,7 @@ const ORIGEM_DA_LEITURA = `
   JOIN especialidade e ON e.id = p.especialidade_id
   JOIN clinica cl      ON cl.id = p.clinica_id
   LEFT JOIN cidade ci  ON ci.id = cl.cidade_id
+  LEFT JOIN plano_de_saude pdc ON pdc.id = c.plano_id
 `;
 
 /** Recorta as colunas de um prefixo e devolve os nomes originais. */
