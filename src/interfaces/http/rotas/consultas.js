@@ -36,6 +36,7 @@ const { semCache } = require('../middlewares/semCache');
 const { validar } = require('../validacao');
 const { objetoEstrito, inteiroPositivo, inteiroPositivoEmCorpo } = require('../esquemas');
 const apresentar = require('../apresentadores');
+const { FORMA_DE_PAGAMENTO, FORMAS } = require('../../../domain/formasDePagamento');
 
 const LIMITE_PADRAO = 20;
 
@@ -55,9 +56,32 @@ const corpoDoAgendamento = objetoEstrito(
       .int('A versão do horário precisa ser um número inteiro.')
       .min(0, 'A versão do horário precisa ser um número inteiro.')
       .max(MAIOR_VERSAO, 'Versão de horário inexistente. Recarregue a lista de horários.'),
+    // Versão 2: opcionais. Sem eles, o fluxo de sempre — pagar pelo app.
+    formaDePagamento: z
+      .enum(FORMAS, {
+        errorMap: () => ({ message: 'Forma de pagamento desconhecida: use app, plano ou clinica.' }),
+      })
+      .optional(),
+    planoId: inteiroPositivoEmCorpo('O plano').optional(),
   },
   'O corpo do agendamento'
-);
+).superRefine((corpo, contexto) => {
+  const comPlano = corpo.formaDePagamento === FORMA_DE_PAGAMENTO.PLANO;
+  if (comPlano && corpo.planoId === undefined) {
+    contexto.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['planoId'],
+      message: 'Informe o plano para pagar com ele.',
+    });
+  }
+  if (!comPlano && corpo.planoId !== undefined) {
+    contexto.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['planoId'],
+      message: 'O plano só é informado quando a forma de pagamento é o plano.',
+    });
+  }
+});
 
 const idNaRota = z.object({ id: inteiroPositivo('O identificador') });
 
@@ -124,6 +148,8 @@ function criarRotasDeConsultas({
         pacienteId: req.paciente.id,
         horarioId: corpo.horarioId,
         versao: corpo.versao,
+        ...(corpo.formaDePagamento ? { formaDePagamento: corpo.formaDePagamento } : {}),
+        ...(corpo.planoId !== undefined ? { planoId: corpo.planoId } : {}),
       });
 
       res

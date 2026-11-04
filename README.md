@@ -770,6 +770,43 @@ Planos e próximo horário saem de subconsultas `LATERAL`, e o filtro por plano 
 um `EXISTS`. Um `JOIN` com os planos repetiria o profissional uma vez por plano,
 e o total da paginação contaria cada repetição.
 
+**Etapa 21: pagar com o plano ou na clínica.** O `POST /consultas` aceita,
+opcionais, `formaDePagamento` (`app`, `plano` ou `clinica`) e `planoId` (só,
+e sempre, com `plano`). Sem eles, o fluxo de sempre.
+
+| Forma | Consulta criada |
+|---|---|
+| `app` (ou ausente) | `pendente_pagamento`, com reserva de 15 minutos e checkout depois |
+| `plano` ou `clinica`, aceitos pelo profissional | `confirmada`, com `reservaExpiraEm: null`, sem checkout. A clínica confere o plano no dia |
+
+As recusas, na ordem em que acontecem:
+
+1. corpo inválido (forma desconhecida, plano sem `planoId`, `planoId` com
+   outra forma): 422 `DADOS_INVALIDOS`;
+2. horário passado, indisponível ou sobreposto: como sempre;
+3. versão disputada: 409 `HORARIO_INDISPONIVEL`;
+4. profissional inativo: 422 `PROFISSIONAL_INDISPONIVEL`;
+5. forma ou plano que o profissional não aceita, ou plano que nem existe: 422
+   `FORMA_DE_PAGAMENTO_NAO_ACEITA` ou `PLANO_NAO_ACEITO`, com ação nula.
+
+As duas últimas são conferidas **dentro da transação da reserva**, depois do
+lock otimista, que não mudou. A recusa desfaz a reserva: o horário volta
+livre e na mesma versão.
+
+Toda consulta da v2 traz `formaDePagamento` e `plano` (`{ id, nome }` ou
+`null`). Uma consulta de plano ou na clínica não se paga pelo aplicativo (422
+`CONSULTA_NAO_PAGAVEL`, "Esta consulta não é paga pelo aplicativo.") e segue as
+mesmas regras de cancelamento das outras. A rotina de expiração não a toca, e
+o lembrete a alcança como a qualquer consulta confirmada.
+
+O banco guarda a regra com três restrições:
+
+- plano escolhido se, e somente se, a forma é plano;
+- só o app fica `pendente_pagamento`;
+- só o app tem prazo de reserva.
+
+A auditoria registra a forma, mas não o plano.
+
 **O catálogo de demonstração**, para a homologação:
 
 ```bash

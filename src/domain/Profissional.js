@@ -9,17 +9,7 @@
  */
 
 const { Dinheiro } = require('./Dinheiro');
-
-/**
- * As formas de pagamento, na ordem em que o aplicativo as oferece. Pagar pelo
- * aplicativo vem primeiro porque é o fluxo original — o pagamento antecipado
- * que é a premissa do trabalho contra as faltas.
- */
-const FORMA_DE_PAGAMENTO = Object.freeze({
-  APP: 'app',
-  PLANO: 'plano',
-  CLINICA: 'clinica',
-});
+const { FORMA_DE_PAGAMENTO } = require('./formasDePagamento');
 
 class Profissional {
   constructor({
