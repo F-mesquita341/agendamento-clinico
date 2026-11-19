@@ -20,6 +20,12 @@
  * e as formas de pagamento variadas: quem aceita pagar na clínica, e quem não
  * aceita pagar pelo aplicativo.
  *
+ * Quixadá e Quixeramobim têm três clínicas cada, com coordenadas próprias (o
+ * "Perto de mim" do aplicativo ordena por elas), e quatro especialidades além
+ * das seis do seed base. Os registros no conselho dos profissionais criados
+ * aqui começam com zeros (CRM-CE 0001xx), formato que não coincide com o de
+ * um médico de verdade. Consultas de exemplo ficam em seed-exemplos.js.
+ *
  * TRAVA: recusa rodar, antes de qualquer escrita, quando o nome do banco tem
  * "producao" ou "coleta" — o banco da coleta não pode receber dado fictício.
  */
@@ -60,7 +66,18 @@ const CLINICAS = [
     -5.2011, -39.2950, '(88) 3000-0002', 'Centro, Quixeramobim - CE'],
   ['00.000.000/0003-00', 'Clínica Demonstração Fortaleza', 'Fortaleza',
     -3.7340, -38.5290, '(85) 3000-0003', 'Centro, Fortaleza - CE'],
+  ['00.000.000/0004-00', 'Clínica Demonstração Quixadá Norte', 'Quixadá',
+    -4.9550, -39.0120, '(88) 3000-0004', 'Endereço fictício, zona norte, Quixadá - CE'],
+  ['00.000.000/0005-00', 'Clínica Demonstração Quixadá Sul', 'Quixadá',
+    -4.9880, -39.0200, '(88) 3000-0005', 'Endereço fictício, zona sul, Quixadá - CE'],
+  ['00.000.000/0006-00', 'Clínica Demonstração Quixeramobim Norte', 'Quixeramobim',
+    -5.1850, -39.2900, '(88) 3000-0006', 'Endereço fictício, zona norte, Quixeramobim - CE'],
+  ['00.000.000/0007-00', 'Clínica Demonstração Quixeramobim Sul', 'Quixeramobim',
+    -5.2150, -39.2970, '(88) 3000-0007', 'Endereço fictício, zona sul, Quixeramobim - CE'],
 ];
+
+// Além das seis do seed base.
+const ESPECIALIDADES_NOVAS = ['Endocrinologia', 'Oftalmologia', 'Otorrinolaringologia', 'Psiquiatria'];
 
 const PLANOS = ['Bem Cuidar', 'Mais Saúde Nordeste', 'Plano Vida Sertão', 'Saúde Central'];
 
@@ -69,6 +86,22 @@ const PROFISSIONAIS_NOVOS = [
   ['CRM-CE 67890', 'Gabriela Matos Pinheiro', 'Cardiologia', '00.000.000/0002-00', 22000, true, true],
   ['CRM-CE 78901', 'Heitor Sampaio Brito', 'Ortopedia', '00.000.000/0003-00', 24000, false, true],
   ['CRM-CE 89012', 'Íris Monteiro Lopes', 'Pediatria', '00.000.000/0003-00', 19000, true, false],
+  // Quixadá Norte
+  ['CRM-CE 000101', 'Joana Pereira Bezerra', 'Oftalmologia', '00.000.000/0004-00', 23000, true, true],
+  ['CRM-CE 000102', 'Lucas Holanda Queiroz', 'Clínica Geral', '00.000.000/0004-00', 12000, true, false],
+  ['CRM-CE 000103', 'Marina Castro Feitosa', 'Endocrinologia', '00.000.000/0004-00', 28000, true, false],
+  // Quixadá Sul
+  ['CRM-CE 000104', 'Otávio Lima Cavalcante', 'Psiquiatria', '00.000.000/0005-00', 35000, true, false],
+  ['CRM-CE 000105', 'Paula Ribeiro Maia', 'Ginecologia', '00.000.000/0005-00', 21000, false, true],
+  ['CRM-CE 000106', 'Rafael Moreira Freitas', 'Otorrinolaringologia', '00.000.000/0005-00', 26000, true, true],
+  // Quixeramobim Norte
+  ['CRM-CE 000107', 'Sara Nogueira Brandão', 'Pediatria', '00.000.000/0006-00', 17000, true, true],
+  ['CRM-CE 000108', 'Tiago Fernandes Lobo', 'Ortopedia', '00.000.000/0006-00', 24000, true, false],
+  ['CRM-CE 000109', 'Vera Lúcia Sampaio', 'Dermatologia', '00.000.000/0006-00', 20000, false, true],
+  // Quixeramobim Sul
+  ['CRM-CE 000110', 'Wesley Araújo Torres', 'Cardiologia', '00.000.000/0007-00', 30000, true, true],
+  ['CRM-CE 000111', 'Yara Costa Rolim', 'Oftalmologia', '00.000.000/0007-00', 22000, true, false],
+  ['CRM-CE 000112', 'Caio Rocha Lustosa', 'Clínica Geral', '00.000.000/0007-00', 13000, true, true],
 ];
 
 // Planos por profissional (pelo registro). Quem não aparece não aceita plano.
@@ -78,6 +111,14 @@ const PLANOS_POR_PROFISSIONAL = {
   'CRM-CE 67890': ['Plano Vida Sertão'], // Gabriela
   'CRM-CE 78901': ['Mais Saúde Nordeste', 'Bem Cuidar'], // Heitor: só plano ou clínica
   'CRM-CE 89012': ['Mais Saúde Nordeste'], // Íris
+  'CRM-CE 000101': ['Bem Cuidar'],
+  'CRM-CE 000103': ['Saúde Central', 'Plano Vida Sertão'],
+  'CRM-CE 000105': ['Mais Saúde Nordeste'], // Paula: só plano ou clínica
+  'CRM-CE 000106': ['Bem Cuidar', 'Saúde Central', 'Mais Saúde Nordeste'],
+  'CRM-CE 000107': ['Plano Vida Sertão'],
+  'CRM-CE 000109': ['Plano Vida Sertão', 'Bem Cuidar'], // Vera: só plano ou clínica
+  'CRM-CE 000110': ['Saúde Central'],
+  'CRM-CE 000111': ['Mais Saúde Nordeste'],
 };
 
 // A Fernanda (pediatria, Quixadá) passa a aceitar também pagar na clínica.
@@ -109,6 +150,13 @@ async function semearDemonstracao(periodo) {
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (cnpj) DO NOTHING`,
       [nome, cnpj, telefone, endereco, await cidadeId(cidade), lat, lon]
+    );
+  }
+
+  for (const nome of ESPECIALIDADES_NOVAS) {
+    await consultar(
+      `INSERT INTO especialidade (nome) VALUES ($1) ON CONFLICT (nome) DO NOTHING`,
+      [nome]
     );
   }
 
@@ -167,6 +215,7 @@ async function semearDemonstracao(periodo) {
       (SELECT count(*) FROM cidade)::int          AS cidades,
       (SELECT count(*) FROM clinica)::int         AS clinicas,
       (SELECT count(*) FROM plano_de_saude)::int  AS planos,
+      (SELECT count(*) FROM especialidade)::int   AS especialidades,
       (SELECT count(*) FROM profissional)::int    AS profissionais`);
   return { ...rows[0], horarios, retirados };
 }
@@ -200,6 +249,7 @@ async function principal() {
       cidades: r.cidades,
       clinicas: r.clinicas,
       planos: r.planos,
+      especialidades: r.especialidades,
       profissionais: r.profissionais,
     });
   } catch (erro) {
@@ -212,4 +262,4 @@ if (require.main === module) {
   principal().finally(encerrar);
 }
 
-module.exports = { bancoProibido, semearDemonstracao };
+module.exports = { bancoProibido, semearDemonstracao, PROFISSIONAIS_NOVOS, CLINICAS, SEM_HORARIO_LIVRE };
