@@ -94,4 +94,4 @@ function lerPeriodo(args, agora = new Date()) {
   return { hoje, ultimoDia };
 }
 
-module.exports = { lerPeriodo, PeriodoInvalido, DIAS_PADRAO, LIMITE_DE_DIAS };
+module.exports = { lerPeriodo, PeriodoInvalido, DIAS_PADRAO, LIMITE_DE_DIAS, hojeNaClinica, somarDias };

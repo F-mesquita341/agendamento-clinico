@@ -123,6 +123,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run migrate:teste` | Aplica migrations no banco de teste |
 | `npm run seed` | Popula dados de trabalho (idempotente). A agenda cobre os próximos 14 dias, ou o período de `--ate AAAA-MM-DD` ou `--dias N` (ver abaixo) |
 | `npm run seed:demonstracao` | Versão 2, só homologação: catálogo fictício com cidades, planos e formas de pagamento; recusa banco de produção (ver abaixo) |
+| `npm run seed:exemplos` | Versão 2, só homologação: pacientes fictícios e um histórico de consultas em Quixadá e Quixeramobim; roda depois do catálogo (ver abaixo) |
 | `npm run clinica:atualizar` | Troca nome, telefone ou endereço da clínica, com confirmação (ver abaixo) |
 | `npm test` | Roda a suíte completa |
 | `npm run test:unit` | Só os testes de unidade, sem banco |
@@ -812,11 +813,15 @@ A auditoria registra a forma, mas não o plano.
 ```bash
 npm run seed -- --ate 2026-12-15
 npm run seed:demonstracao -- --ate 2026-12-15
+npm run seed:exemplos
 ```
 
-- **O que ele cria:** três cidades do Ceará e duas clínicas novas, com
-  coordenadas aproximadas; quatro planos com nomes inventados; profissionais
-  fictícios. Inclui os três casos do card: Ana sem plano, Carlos com três
+- **O que ele cria:** três cidades do Ceará, com três clínicas em Quixadá,
+  três em Quixeramobim e uma em Fortaleza, cada uma com coordenadas próprias
+  (o "Perto de mim" do app ordena por elas); quatro planos com nomes
+  inventados; quatro especialidades além das seis do seed base; 20
+  profissionais fictícios, os criados aqui com registro `CRM-CE 0001xx`, que
+  não coincide com o de um médico de verdade. Inclui os três casos do card: Ana sem plano, Carlos com três
   planos e Íris sem horário livre. Também varia as formas de pagamento: Heitor
   só por plano ou na clínica, Fernanda também na clínica.
 - **A ordem importa: sempre depois do seed base.** O base cria horário para
@@ -824,9 +829,26 @@ npm run seed:demonstracao -- --ate 2026-12-15
 - **Ele se recusa a rodar** quando o nome do banco tem `producao` ou `coleta`,
   antes de qualquer escrita: dado fictício nunca entra no banco da coleta.
 
-**Banco de teste local:** a migration 010 só existe na `versao-2`. Antes de
-voltar a trabalhar na `main`, desfaça-a no banco de teste
-(`node scripts/migrar.js --teste --desfazer`). Senão, o teste do `migrate` na
+**As consultas de exemplo** (`npm run seed:exemplos`, sempre por último):
+
+- **10 pacientes fictícios**, com identificador de conta
+  `demonstracao-paciente-NN`, que não existe no Firebase (ninguém entra no app
+  com eles), e e-mail do domínio reservado `exemplo.invalid`.
+- **40 consultas nos 20 dias úteis anteriores** (32 realizadas, 4 faltas e 4
+  canceladas pelo paciente) e **15 confirmadas nos 10 seguintes**, nas três
+  formas de pagamento, só em Quixadá e Quixeramobim. As pagas pelo app têm
+  pagamento `aprovado` em sandbox, com referência fictícia.
+- **O que fica de fora de propósito:** reserva `pendente_pagamento` (a rotina
+  de expiração consultaria o Mercado Pago), a Íris e Fortaleza, e registro na
+  auditoria (as consultas não passaram pela API).
+- **Não toca em consulta de outra pessoa:** horário já reservado é pulado.
+  Rodar de novo não cria nada. Tem a mesma recusa de banco de produção.
+- **Os números são inventados.** Servem para a agenda não parecer vazia na
+  demonstração; não são resultado e não entram na monografia como dado.
+
+**Banco de teste local:** as migrations 010 e 011 só existem na `versao-2`.
+Antes de voltar a trabalhar na `main`, desfaça as duas no banco de teste
+(`node scripts/migrar.js --teste --desfazer`, duas vezes). Senão, o teste do `migrate` na
 `main` encontra uma migration que os arquivos dela não têm. A CI não tem esse
 problema, porque cria um banco do zero a cada execução.
 
