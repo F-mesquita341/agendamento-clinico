@@ -66,6 +66,15 @@ const esquema = z.object({
   // Endereço público da API, para o Mercado Pago saber aonde mandar o aviso de
   // pagamento. No Render, RENDER_EXTERNAL_URL é definida pela própria
   // plataforma; URL_PUBLICA, se existir, tem prioridade.
+  // Versão 2: pagar pelo aplicativo também com Pix. DESLIGADO por padrão:
+  // desligado, as rotas do Pix nem existem e a API responde como antes. Só o
+  // serviço de homologação o liga, e desligar é o primeiro passo do caminho
+  // de volta.
+  PIX_HABILITADO: z
+    .enum(['true', 'false'], { errorMap: () => ({ message: 'use true ou false' }) })
+    .default('false')
+    .transform((valor) => valor === 'true'),
+
   URL_PUBLICA: z.string().url('precisa ser uma URL completa, com https://').optional(),
   RENDER_EXTERNAL_URL: z.string().url().optional(),
 });

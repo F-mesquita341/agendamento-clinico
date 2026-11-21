@@ -46,6 +46,8 @@ const { rotaNaoEncontrada, tratadorDeErro } = require('./middlewares/erro');
  *        assunto deles
  * @param {number} [deps.janelaDeEscritasMs] só para os testes: encurta a janela
  *        do limite, que em produção é de um minuto
+ * @param {boolean} [deps.pixHabilitado] versão 2: monta as rotas do Pix; padrão,
+ *        PIX_HABILITADO da configuração (desligado)
  */
 function criarApp({
   verificarToken = criarVerificadorFirebase(),
@@ -60,6 +62,7 @@ function criarApp({
   pagamentos,
   dispositivos,
   relogio,
+  pixHabilitado = config.PIX_HABILITADO,
 } = {}) {
   const app = express();
 
@@ -104,6 +107,7 @@ function criarApp({
       pagamentos,
       relogio,
       limitarEscritas,
+      pixHabilitado,
     })
   );
   app.use('/dispositivos', criarRotasDeDispositivos({ verificarToken, pacientes, dispositivos, limitarEscritas }));

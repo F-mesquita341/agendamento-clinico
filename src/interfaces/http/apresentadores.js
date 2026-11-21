@@ -154,7 +154,25 @@ function checkout(ch, c) {
   };
 }
 
+/**
+ * Cobrança Pix aberta de uma consulta (versão 2).
+ *
+ * O aplicativo mostra a imagem (`qrCodeBase64`, um PNG em base64) e oferece o
+ * "copia e cola"; enquanto espera, pergunta à API se foi pago. O prazo é o da
+ * reserva, como no checkout.
+ */
+function pix(p, c) {
+  return {
+    copiaECola: p.pixCopiaECola,
+    qrCodeBase64: p.pixQrBase64,
+    expiraEm: c.reservaExpiraEm ? c.reservaExpiraEm.toISOString() : null,
+    valorCentavos: c.valor.centavos,
+    valorFormatado: c.valor.formatar(),
+  };
+}
+
 module.exports = {
+  pix,
   especialidade,
   cidade,
   plano,

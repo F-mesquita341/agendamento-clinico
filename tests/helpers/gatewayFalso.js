@@ -44,6 +44,21 @@ class GatewayFalso extends GatewayDePagamento {
     return { preferenciaId, checkoutUrl: `https://sandbox.exemplo/checkout/${preferenciaId}` };
   }
 
+  /**
+   * Versão 2: a cobrança Pix. Entra na mesma lista dos checkouts, porque o
+   * pagamento que nasce dela se paga e se busca do mesmo jeito (`pagar`).
+   */
+  async criarPix(dados) {
+    this.verificarDisponivel();
+    const pedidoId = `ORDTST-${this.checkouts.length + 1}`;
+    this.checkouts.push({ ...dados, pedidoId, meio: 'pix' });
+    return {
+      pedidoId,
+      copiaECola: `00020101021226-copia-e-cola-${pedidoId}`,
+      qrBase64: `iVBORw0KGgo-imagem-${pedidoId}`,
+    };
+  }
+
   async consultarPagamento(id) {
     this.verificarDisponivel();
     return this.pagamentos.get(String(id)) ?? null;

@@ -22,6 +22,7 @@
     "test:integracao": "jest tests/integration --runInBand",
     "verificar:token": "node scripts/verificar-token-real.js",
     "verificar:sandbox": "node scripts/verificar-sandbox-mp.js",
+    "verificar:pix": "node scripts/verificar-pix.js",
     "verificar:portao": "node scripts/verificar-portao-pagamento.js",
     "pagina:token": "node scripts/servir-pagina-de-token.js",
     "exportar:pesquisa": "node scripts/exportar-pesquisa.js",

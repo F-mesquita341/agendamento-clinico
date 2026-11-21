@@ -25,6 +25,8 @@ const config = require('../../../config');
 const { AgendarConsulta } = require('../../../application/AgendarConsulta');
 const { CancelarConsulta } = require('../../../application/CancelarConsulta');
 const { IniciarPagamento } = require('../../../application/IniciarPagamento');
+const { IniciarPagamentoPix } = require('../../../application/IniciarPagamentoPix');
+const { ConferirPagamentoPix } = require('../../../application/ConferirPagamentoPix');
 const { RepositorioDePagamentosPg } = require('../../../infra/db/RepositorioDePagamentosPg');
 const { RepositorioDeHorariosPg } = require('../../../infra/db/RepositorioDeHorariosPg');
 const { RepositorioDeConsultasPg } = require('../../../infra/db/RepositorioDeConsultasPg');
@@ -118,6 +120,8 @@ function criarRotasDeConsultas({
   // Sem valor padrão de propósito: faltando, o Express recusa a rota na subida,
   // em vez de o limite ficar desligado em silêncio.
   limitarEscritas,
+  // Versão 2: as rotas do Pix só existem com a chave ligada.
+  pixHabilitado = false,
 }) {
   const rotas = Router();
   const autenticar = criarAutenticar(verificarToken);
@@ -233,6 +237,37 @@ function criarRotasDeConsultas({
       next(semRevelarExistencia(erro));
     }
   });
+
+  // Versão 2, só com PIX_HABILITADO. Desligado, estas rotas nem existem: um
+  // pedido a elas cai no 404 de rota inexistente, como antes do Pix.
+  if (pixHabilitado) {
+    const iniciarPix = new IniciarPagamentoPix({ consultas, pagamentos, gateway, ...comRelogio });
+    const conferirPix = new ConferirPagamentoPix({ consultas, pagamentos, gateway });
+
+    rotas.post('/:id/pagamento/pix', limitarEscritas, carregarPaciente, async (req, res, next) => {
+      try {
+        const { id } = validar(idNaRota, req.params);
+        const { pix, consulta, novo } = await iniciarPix.executar({
+          pacienteId: req.paciente.id,
+          consultaId: id,
+        });
+        res.status(novo ? 201 : 200).json({ pix: apresentar.pix(pix, consulta) });
+      } catch (erro) {
+        next(semRevelarExistencia(erro));
+      }
+    });
+
+    // POST, e não GET: a conferência pode confirmar a consulta.
+    rotas.post('/:id/pagamento/pix/conferir', limitarEscritas, carregarPaciente, async (req, res, next) => {
+      try {
+        const { id } = validar(idNaRota, req.params);
+        const leitura = await conferirPix.executar({ pacienteId: req.paciente.id, consultaId: id });
+        res.json({ consulta: apresentar.consulta(leitura.consulta, leitura) });
+      } catch (erro) {
+        next(semRevelarExistencia(erro));
+      }
+    });
+  }
 
   return rotas;
 }

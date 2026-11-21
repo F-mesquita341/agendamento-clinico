@@ -22,7 +22,8 @@ const { COLUNAS_DA_CONSULTA, paraConsulta } = require('./mapeamentoDeConsulta');
 
 const COLUNAS = `
   id, consulta_id, referencia_externa, pagamento_externo_id, status,
-  valor_centavos, preferencia_id, checkout_url
+  valor_centavos, preferencia_id, checkout_url,
+  meio, pix_copia_e_cola, pix_qr_base64
 `;
 
 function paraCheckout(linha) {
@@ -35,6 +36,10 @@ function paraCheckout(linha) {
     valorCentavos: linha.valor_centavos,
     preferenciaId: linha.preferencia_id,
     checkoutUrl: linha.checkout_url,
+    // Versão 2: 'checkout' (a página do Mercado Pago) ou 'pix'.
+    meio: linha.meio,
+    pixCopiaECola: linha.pix_copia_e_cola,
+    pixQrBase64: linha.pix_qr_base64,
   };
 }
 
@@ -91,6 +96,48 @@ class RepositorioDePagamentosPg extends RepositorioDePagamentos {
       // Dois pedidos simultâneos: o outro gravou primeiro. Vale o dele — o
       // checkout criado por este fica órfão no provedor, e como a URL dele
       // nunca é devolvida a ninguém, não há como pagá-lo.
+      if (erro.code === '23505' && erro.constraint === 'pagamento_um_checkout_aberto') {
+        const existente = await this.checkoutAberto(consultaId);
+        if (existente) return existente;
+      }
+      throw erro;
+    }
+  }
+
+  /**
+   * A cobrança Pix, gravada como o checkout: sob bloqueio da consulta, que é
+   * conferida de novo, e com o mesmo índice de um pagamento aberto por
+   * consulta. A preferência guarda o id do pedido no Mercado Pago; o endereço
+   * de checkout fica nulo, porque o Pix se paga pelo código.
+   */
+  async registrarPix({ consultaId, pacienteId, referencia, valorCentavos, pedidoId, copiaECola, qrBase64, agora }) {
+    try {
+      return await transacao(async (cliente) => {
+        const consulta = await consultaSobBloqueio(cliente, consultaId);
+        consulta.garantirQuePodeSerPagaPor(pacienteId, agora);
+
+        const { rows } = await cliente.query(
+          `INSERT INTO pagamento
+             (consulta_id, referencia_externa, status, valor_centavos, preferencia_id,
+              meio, pix_copia_e_cola, pix_qr_base64)
+           VALUES ($1, $2, 'pendente', $3, $4, 'pix', $5, $6)
+           RETURNING ${COLUNAS}`,
+          [consultaId, referencia, valorCentavos, pedidoId, copiaECola, qrBase64]
+        );
+
+        await auditar(cliente, {
+          atorTipo: 'paciente',
+          atorId: pacienteId,
+          acao: 'pagamento.pix_criado',
+          entidade: 'pagamento',
+          entidadeId: rows[0].id,
+          detalhe: { consultaId },
+        });
+
+        return paraCheckout(rows[0]);
+      });
+    } catch (erro) {
+      // Outro pedido gravou primeiro — vale o dele, que pode ser de outro meio.
       if (erro.code === '23505' && erro.constraint === 'pagamento_um_checkout_aberto') {
         const existente = await this.checkoutAberto(consultaId);
         if (existente) return existente;

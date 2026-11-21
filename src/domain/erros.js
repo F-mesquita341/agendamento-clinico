@@ -98,6 +98,21 @@ class PagamentoIndisponivel extends ErroDeDominio {
 }
 
 /**
+ * Já existe um pagamento aberto para a consulta, por outro meio (Pix ou a
+ * página do Mercado Pago). Abrir um segundo permitiria pagar duas vezes; a
+ * pessoa conclui o que começou ou espera a reserva vencer.
+ */
+class PagamentoEmAndamento extends ErroDeDominio {
+  constructor() {
+    super(
+      'PAGAMENTO_EM_ANDAMENTO',
+      'Você já começou o pagamento desta consulta por outro meio. Conclua por lá.',
+      { status: 409 }
+    );
+  }
+}
+
+/**
  * Token expirado é diferente de token inválido: a pessoa não fez nada de
  * errado, só o tempo passou. A ação diz ao app para renovar o token e repetir
  * a requisição em silêncio, em vez de mandar a pessoa de volta ao login.
@@ -150,6 +165,7 @@ module.exports = {
   RegraDeNegocio,
   ConsultaSobreposta,
   PagamentoIndisponivel,
+  PagamentoEmAndamento,
   SessaoExpirada,
   PerfilNaoCadastrado,
   PacienteJaCadastrado,

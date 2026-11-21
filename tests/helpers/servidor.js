@@ -43,6 +43,7 @@ async function iniciar({
   limiteDeEscritas = SEM_LIMITE_NA_PRATICA,
   janelaDeEscritasMs,
   origens,
+  pixHabilitado,
 } = {}) {
   // Porta 0: o sistema operacional escolhe uma livre. Sem `gateway`, o app usa
   // o padrão — sem credencial no ambiente de teste, um gateway "indisponível".
@@ -54,6 +55,7 @@ async function iniciar({
     ...(origens ? { origens } : {}),
     ...(gateway ? { gateway } : {}),
     ...(segredoDoWebhook ? { segredoDoWebhook } : {}),
+    ...(pixHabilitado !== undefined ? { pixHabilitado } : {}),
   }).listen(0);
 
   // O plano gratuito do Neon suspende o compute quando fica ocioso. A primeira

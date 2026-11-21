@@ -25,6 +25,13 @@ const BASE = 'https://api.mercadopago.com';
 const PRAZO_MS = 10_000;
 
 /**
+ * O pagador do Pix de teste, o mesmo para toda cobrança: nenhum dado do
+ * paciente sai daqui. `APRO` é o nome que faz o pedido se aprovar sozinho no
+ * ambiente de teste do Mercado Pago.
+ */
+const PAGADOR_DE_TESTE = Object.freeze({ email: 'test@testuser.com', nome: 'APRO' });
+
+/**
  * Status do Mercado Pago → status do domínio. Qualquer status desconhecido
  * cai em `pendente`, que nunca confirma consulta: na dúvida, não se libera
  * nada.
@@ -136,6 +143,60 @@ class GatewayMercadoPago extends GatewayDePagamento {
     return { preferenciaId: String(json.id), checkoutUrl };
   }
 
+  /**
+   * Cobrança Pix pela API de Orders (Checkout Transparente), em sandbox.
+   *
+   * O pagador é FIXO e fictício: `first_name: "APRO"` é o que, no ambiente de
+   * teste, faz o pedido se aprovar sozinho em alguns segundos, e o e-mail é o
+   * de teste da documentação. Nenhum dado do paciente vai ao Mercado Pago —
+   * como no checkout. Isto só é aceitável porque a trava de sandbox impede a
+   * API de subir com credencial de conta real.
+   *
+   * O pagamento que nasce do pedido aparece na busca por referência
+   * (`pagamentosDaReferencia`) como um pagamento comum — conferido na prova de
+   * viabilidade de 21/11 (`npm run verificar:pix`). A conferência e a
+   * reconciliação usam esse caminho, e este adaptador não precisa ler pedidos.
+   */
+  async criarPix({ referencia, valor, expiraEm }) {
+    const valorEmReais = (valor.centavos / 100).toFixed(2);
+    // O Pix vence com a reserva: depois do prazo, o horário volta à grade.
+    // Duração ISO 8601, em minutos inteiros, no mínimo um.
+    const minutos = Math.max(1, Math.ceil((expiraEm.getTime() - Date.now()) / 60_000));
+    const corpo = {
+      type: 'online',
+      processing_mode: 'automatic',
+      external_reference: referencia,
+      total_amount: valorEmReais,
+      payer: { email: PAGADOR_DE_TESTE.email, first_name: PAGADOR_DE_TESTE.nome },
+      transactions: {
+        payments: [
+          {
+            amount: valorEmReais,
+            payment_method: { id: 'pix', type: 'bank_transfer' },
+            expiration_time: `PT${minutos}M`,
+          },
+        ],
+      },
+    };
+
+    const resposta = await this.requisitar('POST', '/v1/orders', {
+      corpo,
+      idempotencia: referencia,
+    });
+    if (!resposta.ok) {
+      throw new Error(`Mercado Pago recusou a criação do Pix: HTTP ${resposta.status}`);
+    }
+
+    const json = await resposta.json();
+    const metodo = json.transactions?.payments?.[0]?.payment_method ?? {};
+    if (!json.id || !metodo.qr_code || !metodo.qr_code_base64) {
+      // Sem o código não há como pagar; gravar um Pix assim bloquearia novas
+      // tentativas até a reserva vencer.
+      throw new Error('Mercado Pago criou o Pix sem o código para pagar.');
+    }
+    return { pedidoId: String(json.id), copiaECola: metodo.qr_code, qrBase64: metodo.qr_code_base64 };
+  }
+
   async consultarPagamento(id) {
     const resposta = await this.requisitar('GET', `/v1/payments/${encodeURIComponent(id)}`);
     if (resposta.status === 404) return null;
@@ -188,6 +249,10 @@ class GatewayMercadoPago extends GatewayDePagamento {
  */
 class GatewayNaoConfigurado extends GatewayDePagamento {
   async criarCheckout() {
+    throw new PagamentoIndisponivel('O pagamento não está configurado neste ambiente.');
+  }
+
+  async criarPix() {
     throw new PagamentoIndisponivel('O pagamento não está configurado neste ambiente.');
   }
 

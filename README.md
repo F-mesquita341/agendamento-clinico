@@ -129,6 +129,7 @@ Para desligar de vez: botão direito na barra de título → Propriedades → Op
 | `npm run test:unit` | Só os testes de unidade, sem banco |
 | `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
 | `npm run verificar:sandbox` | Prova a credencial do Mercado Pago contra a API real: confirma que é conta de teste, cria um checkout e confere o pagamento |
+| `npm run verificar:pix` | Versão 2: cria um Pix de teste de R$ 1,00 pelo adaptador da API, contra o sandbox real, e confere que se aprova e que a busca por referência o encontra |
 | `npm run verificar:portao` | Portão da Etapa 8 contra a API publicada: agenda, paga em sandbox e confere a confirmação pelo webhook |
 | `npm run pagina:token` | Página de prova da Etapa 9: registra o navegador como aparelho e recebe o lembrete (ver abaixo) |
 | `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
@@ -846,9 +847,54 @@ npm run seed:exemplos
 - **Os números são inventados.** Servem para a agenda não parecer vazia na
   demonstração; não são resultado e não entram na monografia como dado.
 
-**Banco de teste local:** as migrations 010 e 011 só existem na `versao-2`.
-Antes de voltar a trabalhar na `main`, desfaça as duas no banco de teste
-(`node scripts/migrar.js --teste --desfazer`, duas vezes). Senão, o teste do `migrate` na
+**Pagar com Pix (sandbox), desligado por padrão.** Só existe com
+`PIX_HABILITADO=true`; sem ela, as rotas abaixo nem são montadas (404
+`ROTA_NAO_ENCONTRADA`) e a API responde exatamente como antes. O APK 2.0.1
+nunca as chama.
+
+| Rota | O que faz |
+|---|---|
+| `POST /consultas/:id/pagamento/pix` | 201 com `{ pix: { copiaECola, qrCodeBase64, expiraEm, valorCentavos, valorFormatado } }` quando cria; 200 com o **mesmo** Pix quando já existe um aberto |
+| `POST /consultas/:id/pagamento/pix/conferir` | 200 com `{ consulta }`: pergunta ao Mercado Pago se o Pix foi pago e, se foi, confirma pelo mesmo caminho do webhook. O app chama a cada 5 segundos enquanto espera |
+
+- **As regras do checkout valem iguais:** só a consulta do próprio paciente
+  (a de outro responde 404), pelo aplicativo, aguardando pagamento e dentro
+  do prazo (senão 422 `CONSULTA_NAO_PAGAVEL`); provedor fora do ar, 503
+  `PAGAMENTO_INDISPONIVEL`; o limite de escritas conta as duas rotas.
+- **Um pagamento aberto por consulta, de qualquer meio.** Com a página do
+  Mercado Pago aberta, o Pix é recusado, e vice-versa: 409
+  `PAGAMENTO_EM_ANDAMENTO`. É o mesmo índice único de antes.
+- **Quem decide confirmar continua sendo o domínio:** estado, valor e moeda
+  conferidos, sob bloqueio. Um valor diferente do da consulta não confirma.
+- **A reconciliação da expiração não mudou:** o pagamento do Pix aparece na
+  busca por referência que ela já usa (provado no sandbox em 21/11), então um
+  Pix pago no último instante confirma em vez de cancelar.
+- **Nenhum dado do paciente vai ao Mercado Pago.** O pedido (API de Orders,
+  Checkout Transparente) leva a referência aleatória, o valor, o prazo da
+  reserva e um pagador fictício fixo (`first_name: "APRO"`, que no sandbox se
+  aprova sozinho em segundos). Isso só é possível porque a trava de sandbox
+  impede a API de subir com credencial real.
+- **Banco:** a migration 012 só acrescenta `meio` (`checkout` por padrão, ou
+  `pix`), `pix_copia_e_cola` e `pix_qr_base64` na tabela `pagamento`, com
+  restrições que guardam as colunas do Pix só no Pix. O código anterior
+  convive com ela sem perceber.
+
+**O caminho de volta do Pix**, do mais leve ao mais pesado:
+
+0. **Antes de publicar:** a tag `antes-do-pix` no commit da `versao-2`
+   anterior ao Pix, e uma cópia (branch) do banco da homologação no painel do
+   Neon.
+1. **Desligar a variável** `PIX_HABILITADO=false` no Render. Sem deploy de
+   código, as rotas voltam a 404 em cerca de um minuto.
+2. **Voltar o deploy** pelo *Rollback* do Render para o deploy de
+   `antes-do-pix`. Funciona porque a migration 012 é só acréscimo.
+3. **Desfazer de vez:** `git revert` do merge e
+   `node scripts/migrar.js --desfazer` no banco da homologação, que remove a
+   012 e apaga os Pix de teste. No limite, restaurar a cópia do Neon.
+
+**Banco de teste local:** as migrations 010, 011 e 012 só existem na
+`versao-2`. Antes de voltar a trabalhar na `main`, desfaça as três no banco de
+teste (`node scripts/migrar.js --teste --desfazer`, três vezes). Senão, o teste do `migrate` na
 `main` encontra uma migration que os arquivos dela não têm. A CI não tem esse
 problema, porque cria um banco do zero a cada execução.
 

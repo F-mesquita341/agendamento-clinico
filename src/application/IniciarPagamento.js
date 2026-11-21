@@ -12,7 +12,7 @@
  */
 
 const crypto = require('node:crypto');
-const { NaoEncontrado } = require('../domain/erros');
+const { NaoEncontrado, PagamentoEmAndamento } = require('../domain/erros');
 const { DESCRICAO_DO_ITEM } = require('../domain/Pagamento');
 const { relogioDoSistema } = require('../domain/Relogio');
 
@@ -52,6 +52,9 @@ class IniciarPagamento {
 
     const aberto = await this.pagamentos.checkoutAberto(consulta.id);
     if (aberto) {
+      // Versão 2: o aberto pode ser um Pix, que não tem página para abrir.
+      // Sem o Pix ligado, essa linha nunca existe e nada aqui muda.
+      if (aberto.meio === 'pix') throw new PagamentoEmAndamento();
       return { checkout: aberto, consulta, novo: false };
     }
 
@@ -75,6 +78,8 @@ class IniciarPagamento {
       agora,
     });
 
+    // Um Pix gravado no mesmo instante por outro pedido ganha a disputa.
+    if (checkout.meio === 'pix') throw new PagamentoEmAndamento();
     return { checkout, consulta, novo: checkout.referencia === referencia };
   }
 }

@@ -35,6 +35,22 @@ class GatewayDePagamento {
   }
 
   /**
+   * Cria uma cobrança Pix no provedor (versão 2, só com PIX_HABILITADO).
+   * Como no checkout, nenhum dado do paciente é enviado.
+   *
+   * O pagamento que resulta dela aparece em `pagamentosDaReferencia` como
+   * qualquer outro — é isso que deixa a reconciliação e a conferência usarem o
+   * mesmo caminho do Checkout Pro.
+   *
+   * @param {{referencia: string, valor: import('./Dinheiro').Dinheiro, expiraEm: Date}} _dados
+   * @returns {Promise<{pedidoId: string, copiaECola: string, qrBase64: string}>}
+   *          Lança `PagamentoIndisponivel` se o provedor não responder.
+   */
+  async criarPix(_dados) {
+    naoImplementado('GatewayDePagamento.criarPix');
+  }
+
+  /**
    * Busca um pagamento pelo id do provedor — a fonte de verdade, e não o corpo
    * da notificação.
    *
@@ -73,7 +89,9 @@ class GatewayDePagamento {
 
 /**
  * Um CHECKOUT é `{ id, consultaId, referencia, status, valorCentavos,
- * preferenciaId, checkoutUrl }`.
+ * preferenciaId, checkoutUrl, meio, pixCopiaECola, pixQrBase64 }`. `meio` é
+ * 'checkout' (a página do Mercado Pago) ou 'pix'; os campos `pix*` só vêm no
+ * Pix, e `checkoutUrl`, só no checkout.
  */
 class RepositorioDePagamentos {
   /** @returns {Promise<object|null>} o checkout aberto da consulta, se houver */
@@ -92,6 +110,20 @@ class RepositorioDePagamentos {
    */
   async registrarCheckout(_dados) {
     naoImplementado('RepositorioDePagamentos.registrarCheckout');
+  }
+
+  /**
+   * Grava a cobrança Pix recém-criada no provedor, com auditoria. Mesma regra
+   * do checkout: um pagamento aberto por consulta, garantida pelo banco; se um
+   * pedido simultâneo já gravou outro, devolve aquele — e ele pode ser de
+   * outro meio, o que o caso de uso confere.
+   *
+   * @param {{consultaId, pacienteId, referencia, valorCentavos, agora,
+   *          pedidoId, copiaECola, qrBase64}} _dados
+   * @returns {Promise<object>} o pagamento aberto que vale
+   */
+  async registrarPix(_dados) {
+    naoImplementado('RepositorioDePagamentos.registrarPix');
   }
 
   /**
