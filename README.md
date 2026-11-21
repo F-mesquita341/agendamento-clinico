@@ -848,8 +848,11 @@ npm run seed:exemplos
   demonstração; não são resultado e não entram na monografia como dado.
 
 **Pagar com Pix (sandbox), desligado por padrão.** Só existe com
-`PIX_HABILITADO=true`; sem ela, as rotas abaixo nem são montadas (404
-`ROTA_NAO_ENCONTRADA`) e a API responde exatamente como antes. O APK 2.0.1
+`PIX_HABILITADO=true`; sem ela, as rotas abaixo nem são montadas e a API
+responde exatamente como antes: com token, 404 `ROTA_NAO_ENCONTRADA`; sem
+token, 401, como qualquer rota de `/consultas`, porque a autenticação vem
+antes da rota. Por isso, de fora, só um pedido com token mostra se a chave
+está ligada. O APK 2.0.1
 nunca as chama.
 
 | Rota | O que faz |
