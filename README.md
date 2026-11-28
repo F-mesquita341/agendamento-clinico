@@ -1,7 +1,7 @@
 # API de Agendamento de Consultas Clínicas
 
 API REST que intermedia o agendamento e o pagamento de consultas entre pacientes
-e clínicas de pequeno e médio porte.
+e clínicas de pequeno e médio porte. É o back-end do aplicativo **Marcaí**.
 
 Produto secundário do Trabalho de Conclusão de Curso **“Desenvolvimento de um
 aplicativo móvel para gerenciamento e pagamento centralizado de consultas
@@ -16,6 +16,16 @@ de Quixadá.
 > A integração de pagamento opera **exclusivamente em ambiente sandbox**:
 > nenhuma transação financeira real é processada.
 
+## Versões
+
+| Versão | Branch | Ambiente | O que tem |
+|---|---|---|---|
+| v1 | `main` | produção | Agendamento com lock otimista, pagamento antecipado em sandbox, lembrete, LGPD |
+| v2 | `versao-2` | homologação | A v1 mais cidades, planos de saúde, pagar pelo plano ou na clínica, próximo horário e, desligado por padrão, Pix em sandbox ([Versão 2](#versão-2)) |
+
+As sessões com participantes usaram o aplicativo **2.0.1** contra a
+homologação, sem Pix. O Pix aparece a partir do aplicativo 2.1.0.
+
 ## Tecnologias
 
 | Camada | Tecnologia |
@@ -26,8 +36,11 @@ de Quixadá.
 | Validação | Zod |
 | Migrations | node-pg-migrate |
 | Autenticação | Firebase Authentication (Admin SDK) |
+| Notificações | Firebase Cloud Messaging |
+| Pagamento | Mercado Pago (sandbox) |
 | Testes | Jest e Supertest |
 | CI | GitHub Actions |
+| Hospedagem | Render |
 
 ## Arquitetura
 
@@ -42,137 +55,8 @@ src/
   interfaces/    rotas HTTP, controllers, middlewares
 ```
 
-Se um arquivo de `domain/` precisar de um `require` de framework, a regra foi
-quebrada em algum lugar.
-
-## Como rodar
-
-Pré-requisitos: Node.js 24 — a versão da integração contínua e do Render, e a
-única testada — e uma conta no [Neon](https://neon.tech) (tier gratuito).
-
-```bash
-git clone <url-deste-repositorio>
-cd agendamento-clinico
-npm install
-```
-
-Crie **dois bancos** no mesmo projeto do Neon — um de desenvolvimento e um de
-teste. A suíte automatizada limpa tabelas, e você não quer que ela apague os
-dados que usou para testar na mão.
-
-```bash
-cp .env.example .env    # no PowerShell: copy .env.example .env
-```
-
-Preencha `DATABASE_URL` e `DATABASE_URL_TESTE` no `.env`. Depois:
-
-```bash
-npm run migrate         # cria o schema no banco de desenvolvimento
-npm run migrate:teste   # cria o mesmo schema no banco de teste
-npm run seed            # popula especialidades, profissionais e agenda
-npm run dev             # sobe em http://localhost:3000
-```
-
-Confirme com:
-
-```bash
-curl http://localhost:3000/saude
-```
-
-Resposta esperada:
-
-```json
-{ "status": "ok", "banco": "conectado", "latencia_ms": 42 }
-```
-
-### Se a conexão der timeout
-
-Algumas redes gerenciadas — faculdades, empresas, certos provedores — liberam
-apenas as portas 80 e 443 e barram a 5432, que é a do PostgreSQL. O sintoma é
-`ETIMEDOUT` ao conectar, mesmo com a internet funcionando normalmente.
-
-Para confirmar, verifique se o mesmo host responde na 443 e não na 5432. Se for
-o caso, troque o transporte no `.env`:
-
-```
-TRANSPORTE_BANCO=websocket
-```
-
-O Neon passa a ser acessado por um driver que fala o protocolo do PostgreSQL
-sobre WebSocket, na porta 443. O banco continua sendo PostgreSQL, o SQL é o
-mesmo e as transações — das quais o lock otimista depende — funcionam
-normalmente. Muda só o transporte.
-
-### Se a API parar de responder no Windows
-
-No console clássico do Windows, um clique dentro da janela ativa o **modo de
-seleção** — o título passa a começar com "Selecionar" — e o processo congela na
-próxima vez que tenta escrever na tela. A API continua aceitando conexões, mas
-não responde nenhuma. Aperte **Esc** na janela da API e ela volta na hora.
-
-Para desligar de vez: botão direito na barra de título → Propriedades → Opções
-→ desmarcar **Modo de Edição Rápida**.
-
-## Scripts
-
-| Comando | O que faz |
-|---|---|
-| `npm run dev` | Sobe a API com recarga automática |
-| `npm start` | Sobe a API |
-| `npm run migrate` | Aplica migrations no banco de desenvolvimento |
-| `npm run migrate:teste` | Aplica migrations no banco de teste |
-| `npm run seed` | Popula dados de trabalho (idempotente). A agenda cobre os próximos 14 dias, ou o período de `--ate AAAA-MM-DD` ou `--dias N` (ver abaixo) |
-| `npm run seed:demonstracao` | Versão 2, só homologação: catálogo fictício com cidades, planos e formas de pagamento; recusa banco de produção (ver abaixo) |
-| `npm run seed:exemplos` | Versão 2, só homologação: pacientes fictícios e um histórico de consultas em Quixadá e Quixeramobim; roda depois do catálogo (ver abaixo) |
-| `npm run clinica:atualizar` | Troca nome, telefone ou endereço da clínica, com confirmação (ver abaixo) |
-| `npm test` | Roda a suíte completa |
-| `npm run test:unit` | Só os testes de unidade, sem banco |
-| `npm run verificar:token` | Prova a autenticação com tokens reais do Firebase (ver abaixo) |
-| `npm run verificar:sandbox` | Prova a credencial do Mercado Pago contra a API real: confirma que é conta de teste, cria um checkout e confere o pagamento |
-| `npm run verificar:pix` | Versão 2: cria um Pix de teste de R$ 1,00 pelo adaptador da API, contra o sandbox real, e confere que se aprova e que a busca por referência o encontra |
-| `npm run verificar:portao` | Portão da Etapa 8 contra a API publicada: agenda, paga em sandbox e confere a confirmação pelo webhook |
-| `npm run pagina:token` | Página de prova da Etapa 9: registra o navegador como aparelho e recebe o lembrete (ver abaixo) |
-| `npm run carga` | Teste de concorrência da Seção 4.5, com relatório (ver abaixo) |
-| `npm run exportar:pesquisa` | Conjunto de dados da pesquisa, pseudonimizado, numa pasta fora do repositório (ver abaixo) |
-| `npm run auditar:historico` | Procura credenciais em todo o histórico do Git, sem nunca mostrar o valor (ver abaixo) |
-
-### Seed e dados da clínica em produção
-
-O seed só acrescenta: horário que já existe fica como está, reservado ou não,
-e consulta não é tocada. Uma rodada pode cobrir a coleta inteira:
-
-```bash
-npm run seed -- --ate 2026-12-15
-```
-
-Os horários vão de amanhã até o dia informado, de segunda a sexta, das 08:00
-às 11:30 e das 14:00 às 17:30, no fuso da clínica. Data inválida, no passado ou
-a mais de 120 dias é recusada antes de qualquer escrita.
-
-Os dados da clínica (nome, telefone, endereço) não se trocam pelo seed, que
-nunca sobrescreve a clínica existente. Para pôr os da clínica parceira:
-
-```bash
-npm run clinica:atualizar -- --nome "…" --telefone "…" --endereco "…"
-```
-
-Só os campos informados mudam. O script mostra o host e o nome do banco, a
-linha atual e a nova, e só grava depois de um `s`. Ele não trava nada enquanto
-espera: o `UPDATE` só vale se a linha ainda for a que foi mostrada.
-
-Os dois usam o banco de `DATABASE_URL`. Para o de produção, defina-a no seu
-terminal antes, sem que ela apareça na tela nem no histórico:
-
-```powershell
-$s = Read-Host -AsSecureString "DATABASE_URL de producao"
-$env:DATABASE_URL = [System.Net.NetworkCredential]::new('', $s).Password
-$env:DATABASE_URL -match '/agendamento_producao'   # True: é a de produção
-$env:TRANSPORTE_BANCO = 'websocket'; npm run seed -- --ate 2026-12-15
-Remove-Item Env:DATABASE_URL; Remove-Variable s
-```
-
-Sem a variável, o script cai em silêncio no banco de desenvolvimento do `.env`
-— por isso a conferência do `-match` antes de rodar.
+Um teste de arquitetura lê `domain/` e `application/` e falha se algum arquivo
+importar framework, banco ou provedor.
 
 ## Convenções da API
 
@@ -200,68 +84,50 @@ interpretar o texto da mensagem.
 | 404 | Não existe — ou pertence a outro paciente, sem distinção |
 | 409 | Conflito de concorrência ou de estado |
 | 422 | Regra de negócio violada |
-| 429 | Escritas demais em pouco tempo — ver abaixo |
+| 429 | Escritas demais em pouco tempo |
 | 500 | Erro interno |
 
 ### Limite de escritas
 
-Cada paciente tem até `LIMITE_ESCRITAS_POR_MINUTO` escritas por minuto (30 por
-padrão). Passando disso, a API responde **429** `MUITAS_REQUISICOES`, com a
-ação `tentar_novamente` e o cabeçalho `Retry-After`, em segundos. Toda escrita
-também leva os cabeçalhos `RateLimit` e `RateLimit-Policy`, com quanto resta. Os
-três ficam expostos pelo CORS, para um cliente de navegador também conseguir
-lê-los.
+Cada paciente tem até 30 escritas por minuto (`LIMITE_ESCRITAS_POR_MINUTO`).
+Passando disso, a API responde **429** `MUITAS_REQUISICOES`, com a ação
+`tentar_novamente` e o cabeçalho `Retry-After`.
 
 - **A chave é o paciente, não o IP.** Celulares atrás do NAT da operadora
   dividem o mesmo endereço, e um limite por IP puniria um desconhecido pelo
   outro.
-- **O orçamento é um só**, somado entre todas as rotas de escrita: cadastro,
-  atualização do perfil, agendamento, cancelamento, pagamento e registro e
-  revogação de aparelho.
-- **Pedido recusado também conta.** Se só os bem-sucedidos contassem, bastaria
-  mandar pedidos inválidos para escrever à vontade.
-- **Fora do limite:** as leituras, `/saude` e o webhook do Mercado Pago — que
-  reenvia o que recebe 429, e que a assinatura já protege.
-- **Limitação conhecida — leituras públicas.** `/saude`, `/especialidades`,
-  `/profissionais` e a grade de horários consultam o banco sem login e sem
-  limite. Nas rotas protegidas não há esse problema: pedido sem token recebe
-  401 antes de tocar o Firebase ou o banco, e token falso é recusado pela
-  conferência local da assinatura. Limitar as leituras públicas exigiria chavear
-  por IP, o que puniria quem divide o endereço da operadora.
+- **O orçamento é um só**, somado entre todas as rotas de escrita, e **pedido
+  recusado também conta**: senão, bastaria mandar pedidos inválidos para
+  escrever à vontade.
+- **Fora do limite:** as leituras, `/saude` e o webhook do Mercado Pago, que a
+  assinatura já protege.
+- **Limitação conhecida:** as leituras públicas (catálogo e grade) não têm
+  limite. Limitá-las exigiria chavear por IP.
 
 A contagem fica na memória do processo. Com uma instância só, como hoje no
-Render, basta; com várias, cada uma contaria à parte, e o limite precisaria de
-um armazenamento compartilhado.
+Render, basta.
 
 ### Cache
 
 | Resposta | `Cache-Control` | Por quê |
 |---|---|---|
 | `GET /especialidades` | `public, max-age=3600` | Lista fechada, quase nunca muda |
-| `GET /profissionais` e `/profissionais/:id` | `public, max-age=300` | Muda pouco, mas um profissional desativado ou com valor novo não deve aparecer por muito tempo |
+| `GET /profissionais` e `/profissionais/:id` | `public, max-age=300` | Muda pouco, mas um profissional desativado não deve aparecer por muito tempo |
 | `GET /profissionais/:id/horarios` | `no-store` | Uma grade velha mostraria como livre o horário que outra pessoa acabou de reservar |
 | Perfil, consultas, aparelhos | `no-store` | Dado pessoal — consulta marcada é dado de saúde |
 | `GET /consentimento/termo-vigente` | `no-store` | A troca de versão vale já no pedido seguinte |
 
-O lock otimista protege a integridade mesmo com uma grade velha — o pedido com a
-versão desatualizada recebe 409 —, mas o paciente não deveria nem ver o horário.
-
 ### Clínica do profissional
 
-Todo profissional sai com a clínica onde atende — em `GET /profissionais`,
+Todo profissional sai com a clínica onde atende, em `GET /profissionais`,
 `GET /profissionais/:id`, `GET /consultas` e `GET /consultas/:id`:
 
 ```json
 "clinica": { "id": 1, "nome": "Clínica Exemplo Quixadá", "telefone": "(88) 3000-0000", "endereco": "Centro, Quixadá - CE" }
 ```
 
-É o contato que o aplicativo mostra para o paciente ligar ou chegar à consulta.
-`telefone` e `endereco` podem vir `null` — a chave existe sempre, para o
-aplicativo decidir pela presença do valor se mostra "Ligar" ou "Abrir no mapa".
-O CNPJ não sai: o repositório não o seleciona, e o apresentador devolve uma
-lista fechada de campos. A resposta do `POST /consultas` continua sem
-`profissional`, e o cache de `/profissionais` continua o mesmo: clínica também
-é cadastro, que muda pouco.
+`telefone` e `endereco` podem vir `null`; a chave existe sempre. O CNPJ não
+sai: o apresentador devolve uma lista fechada de campos.
 
 ## Controle de concorrência
 
@@ -282,16 +148,13 @@ Há ainda duas defesas no próprio banco, porque toda regra que compara estado
 antes de gravar tem uma janela em que dois pedidos passam juntos:
 
 - o índice único parcial `consulta_horario_ativo` impede duas consultas ativas
-  no mesmo **horário**, mesmo que algum caminho futuro esqueça de comparar a
-  versão;
+  no mesmo **horário**;
 - a restrição de exclusão `consulta_sem_sobreposicao` impede duas consultas
-  ativas sobrepostas na agenda do mesmo **paciente**. O lock otimista não cobre
-  esse caso: dois pedidos simultâneos para horários diferentes reservam linhas
-  diferentes, sem nada em comum para disputar.
+  ativas sobrepostas na agenda do mesmo **paciente**, caso que o lock otimista
+  não cobre.
 
-As duas são *parciais* — ignoram consultas canceladas — porque um horário
-cancelado precisa voltar a ser agendável, enquanto o registro do cancelamento
-permanece para o histórico.
+As duas ignoram consultas canceladas, porque um horário cancelado precisa
+voltar a ser agendável, enquanto o registro do cancelamento fica no histórico.
 
 ## Agendamento
 
@@ -302,26 +165,20 @@ permanece para o histórico.
 | `GET /consultas/:id` | Detalhe de uma consulta própria |
 | `PATCH /consultas/:id/cancelamento` | Cancela e devolve o horário à grade |
 
-O fluxo do aplicativo é: ler a grade em `GET /profissionais/:id/horarios`,
-guardar a `versao` de cada horário e reenviá-la ao agendar. A consulta nasce em
-`pendente_pagamento`, com o valor do profissional congelado no ato e uma reserva
-válida por `RESERVA_MINUTOS` (15 por padrão).
+A consulta nasce em `pendente_pagamento`, com o valor do profissional congelado
+no ato e uma reserva de 15 minutos (`RESERVA_MINUTOS`).
 
 Cancelar **não apaga** a consulta: ela muda para `cancelada` e continua no
-histórico, que é a matéria-prima da análise de absenteísmo. O horário volta para
-`disponivel` com a versão incrementada de novo — quem ainda tiver a versão
-anterior em mãos precisa recarregar a grade.
+histórico, que é a matéria-prima da análise de absenteísmo. O horário volta
+para `disponivel` com a versão incrementada.
 
-Cancelar pelo aplicativo tem dois limites de tempo, conferidos também sob o
-bloqueio da consulta:
+Cancelar pelo aplicativo tem dois limites de tempo:
 
-- **Consulta paga que já começou não se cancela.** A devolução integral vale só
-  antes do horário. Depois dele, quem faltou continua como falta: se pudesse
-  cancelar, a falta viraria "cancelada pelo paciente" nos dados da pesquisa. O
-  caminho é falar com a clínica.
+- **Consulta paga que já começou não se cancela.** Senão, uma falta viraria
+  "cancelada pelo paciente" nos dados da pesquisa. O caminho é falar com a
+  clínica.
 - **Reserva vencida também não.** Ela está com a rotina de expiração, que
-  pergunta ao Mercado Pago antes de devolver o horário — o pagamento pode ter
-  sido aprovado e o aviso, perdido. A recusa é a mesma do pagamento.
+  pergunta ao Mercado Pago antes de devolver o horário.
 
 | Código | Ação indicada | Quando |
 |---|---|---|
@@ -334,13 +191,12 @@ bloqueio da consulta:
 | `RESERVA_EXPIRADA` (422) | — | Cancelar (ou pagar) reserva cujo prazo passou |
 | `NAO_ENCONTRADO` (404) | — | A consulta não existe **ou pertence a outro paciente** |
 
-Consulta de outro paciente responde exatamente como consulta inexistente. Um
-403 não informaria nada ao dono legítimo, que nunca o recebe, e permitiria a
-qualquer paciente autenticado contar os registros da clínica percorrendo ids.
+Consulta de outro paciente responde exatamente como consulta inexistente: um
+403 permitiria a qualquer paciente autenticado contar os registros da clínica
+percorrendo ids.
 
-Na grade, `?de=` e `?ate=` aceitam instante ISO 8601 ou data sem hora
-(`AAAA-MM-DD`), lida como meia-noite **no fuso da clínica**, `America/Fortaleza`.
-Janela com fim anterior ao início responde `JANELA_INVALIDA` (422).
+Na grade, `?de=` e `?ate=` aceitam instante ISO 8601 ou data sem hora, lida
+como meia-noite no fuso da clínica (`America/Fortaleza`).
 
 ## Pagamento (sandbox)
 
@@ -358,37 +214,23 @@ API nem pelo aplicativo.
 3. O Mercado Pago avisa a API pelo webhook. A API **confere a assinatura**, busca
    o pagamento **no próprio Mercado Pago** — o conteúdo do aviso não é usado —,
    confere valor e moeda, e confirma a consulta.
-4. O app acompanha por `GET /consultas/:id` até ver `confirmada`. O retorno da
-   página de pagamento não confirma nada.
+4. O app acompanha por `GET /consultas/:id` até ver `confirmada`.
 
 Reservas não pagas expiram: uma rotina, a cada minuto, cancela a consulta
-vencida com `motivoCancelamento: "reserva_expirada"`, devolve o horário à grade e
-encerra o checkout. Antes, ela pergunta ao Mercado Pago se houve pagamento cujo
-aviso se perdeu — e, se houve, confirma em vez de expirar.
+vencida com `motivoCancelamento: "reserva_expirada"` e devolve o horário à
+grade. Antes, ela pergunta ao Mercado Pago se houve pagamento cujo aviso se
+perdeu — e, se houve, confirma em vez de expirar.
 
 **Trava de sandbox:** a API **não sobe** com credencial de conta real. Na
 subida, ela pergunta ao Mercado Pago de quem é a credencial (`GET /users/me`) e
-só abre a porta se a conta tiver a marca `test_user`. Se o provedor não
-responder, também não sobe: "não consegui verificar" não é "está tudo bem".
-
-Essa verificação substituiu outra, que recusava pagamento marcado como real
-pelo Mercado Pago. A primeira ligação com a API real mostrou que aquele campo
-não distingue nada — pagamento feito com conta de teste, cartão de teste e
-dinheiro fictício volta com `live_mode: true`, porque a conta de teste opera em
-modo produção. A trava antiga recusaria todo pagamento legítimo e ainda assim
-não pegaria o caso perigoso. A nova acontece antes de existir qualquer cobrança,
-e não depois. O modo relatado pelo provedor continua gravado na auditoria de
-cada pagamento, como informação.
-
-O banco tem uma restrição que só aceita `ambiente = 'sandbox'` na tabela de
-pagamentos — segunda linha de defesa contra escrita manual: nada no código
-escreve outro valor.
-
-Cancelar uma consulta **já paga** não estorna nada — estorno automático está
-fora do escopo —, mas registra em auditoria que há estorno a fazer.
+só abre a porta se a conta for de teste. Se o provedor não responder, também
+não sobe. O banco ainda só aceita `ambiente = 'sandbox'` na tabela de
+pagamentos.
 
 O que vai ao Mercado Pago é o mínimo: o item "Consulta médica", o valor, uma
-referência aleatória e o prazo. Nada do paciente.
+referência aleatória e o prazo. Nada do paciente. Cancelar uma consulta já paga
+não estorna nada (estorno automático está fora do escopo), mas registra em
+auditoria que há estorno a fazer.
 
 | Código | Quando |
 |---|---|
@@ -399,191 +241,41 @@ referência aleatória e o prazo. Nada do paciente.
 
 ## Lembrete de consulta
 
-A Seção 3.2 do projeto aponta o lembrete automatizado entre as intervenções de
-maior efetividade documentada contra o absenteísmo, ao lado do pagamento
-prévio. O trabalho incorpora as duas.
+O projeto aponta o lembrete automatizado entre as intervenções de maior
+efetividade documentada contra o absenteísmo, ao lado do pagamento prévio. O
+trabalho incorpora as duas.
 
 | Rota | Acesso | O que faz |
 |---|---|---|
 | `POST /dispositivos` | token | Registra o aparelho — `{ token, plataforma }` → 201 `{ dispositivo: { id } }` |
 | `DELETE /dispositivos/:id` | token + dono | Revoga o aparelho, 204; aparelho alheio ou inexistente, 404 |
 
-O aparelho é revogado pelo **id**, e não pelo token: o token identifica o
-telefone, e o caminho da URL é o lugar mais registrado de uma requisição — log
-de acesso, proxies, histórico. Registro, reatribuição e revogação entram na
-auditoria, sempre sem o token.
-
 Uma rotina, a cada 15 minutos, avisa pelo Firebase Cloud Messaging quem tem
-consulta **confirmada** começando nas próximas 24 horas, e marca
-`lembrete_enviado_em`. É essa marca que impede o mesmo lembrete de sair a cada
-rodada.
+consulta **confirmada** nas próximas 24 horas.
 
-**A marca é gravada ANTES do envio.** Marcando depois, uma queda entre o envio e
-a gravação faria a rodada seguinte reenviar. Marcando antes, a mesma queda perde
-o lembrete — que é o erro menos grave dos dois. Se o provedor recusar o envio, a
-marca é desfeita e a rodada seguinte tenta. Mas só o **envio** desfaz a marca:
-falha no que vem depois — auditar, apagar token morto — é registrada no log e a
-marca fica, porque o lembrete já saiu e desfazê-la o mandaria de novo.
-
-**A mensagem expira no começo da consulta.** Sem isso, o provedor a guarda por
-semanas para aparelho desligado, e o lembrete poderia chegar depois da consulta
-dizendo "amanhã".
-
-**O texto não revela dado de saúde.** "Você tem uma consulta amanhã às 14:30" —
-sem especialidade, sem profissional. Notificação aparece em tela bloqueada, e
-quem estiver por perto lê (LGPD, Art. 11).
-
-**Um aparelho que troca de conta é reatribuído**, e não duplicado: o token é
-único na tabela. Com duas linhas, o dono anterior continuaria recebendo naquele
-telefone o lembrete das consultas dele.
-
-Tokens que o provedor diz não existirem mais — aplicativo desinstalado — são
-apagados. Falha momentânea não apaga nada: um token bom apagado por engano
-deixaria a pessoa sem lembrete para sempre, em silêncio.
-
-**Quem ainda não tem aparelho não perde o lembrete.** A rotina só considera
-consultas de pacientes com aparelho registrado. Quem agenda e só ativa as
-notificações depois — mesmo já dentro das 24 horas — é lembrado na rodada
-seguinte ao registro.
+- **A marca de enviado é gravada antes do envio.** Uma queda no meio perde o
+  lembrete em vez de mandá-lo duas vezes, que é o erro menos grave. Se o
+  provedor recusar, a marca é desfeita e a rodada seguinte tenta.
+- **A mensagem expira no começo da consulta**, para não chegar depois dela
+  dizendo "amanhã".
+- **O texto não revela dado de saúde:** "Você tem uma consulta amanhã às
+  14:30", sem especialidade nem profissional, porque aparece em tela bloqueada
+  (LGPD, Art. 11).
+- **Um aparelho que troca de conta é reatribuído**, e não duplicado, para o
+  dono anterior não receber o lembrete do outro.
+- **O aparelho é revogado pelo id**, e não pelo token, que identifica o
+  telefone e ficaria registrado em logs de acesso.
 
 **Limitação do plano gratuito:** a rotina só roda com a API acordada, e no
-Render ela hiberna depois de 15 minutos. Um lembrete pode sair atrasado, ou não
-sair. As sessões com participantes devem começar acordando o serviço.
-
-### Prova com a página de teste
-
-O aplicativo Flutter é a Fase 4 e ainda não existe, então a prova da etapa usa
-uma página web que faz o mesmo que ele fará: entra no Firebase, obtém o token do
-FCM e se registra na API. Ela precisa de quatro valores no `.env`, todos da tela
-**Configurações do projeto** do console do Firebase — `FIREBASE_WEB_API_KEY`,
-`FIREBASE_WEB_APP_ID` e `FIREBASE_WEB_SENDER_ID` no app Web, e
-`FIREBASE_WEB_VAPID_KEY` em **Cloud Messaging → Certificados push da Web**.
-Nenhum deles é segredo: é a configuração pública de um app web.
-
-```bash
-npm run pagina:token
-```
-
-Abra `http://localhost:4000` no Chrome ou no Edge, em janela **normal** — janela
-anônima e o Brave bloqueiam as notificações do Firebase. Pelo endereço
-`localhost`, e não `127.0.0.1`: a API publicada só aceita essa origem no
-navegador (ver CORS em [Publicação](#publicação)).
-
-**Registre o navegador ANTES de agendar.** A página não faz nada sozinha: é
-preciso entrar e clicar em "Ativar notificações". Depois, com a página aberta
-(ela mantém a API acordada), agende e pague pelo `verificar:portao`; o lembrete
-chega em até 15 minutos.
-
-O portão da Etapa 9 foi atingido assim em 22/09/2026, contra a API publicada:
-o lembrete chegou uma vez, e nenhuma rodada seguinte o repetiu. O aparelho
-Android real fica para quando o aplicativo existir.
-
-## Publicação
-
-A API roda no Render, descrita por [`render.yaml`](render.yaml) — plano,
-região, rota de saúde e comando de início ficam no repositório, e só os
-segredos são preenchidos no painel. O banco continua no Neon e a autenticação
-no Firebase; o Render hospeda apenas o processo Node.
-
-O serviço é criado por **Blueprints → New Blueprint Instance**, apontando para
-este repositório. O painel pede as seis variáveis marcadas `sync: false`:
-`DATABASE_URL`, as três `FIREBASE_*` e as duas `MERCADO_PAGO_*`. As migrations
-rodam antes de a porta abrir (`npm run migrate && npm start`), porque uma
-publicação com migration pendente não pode subir pela metade.
-
-**CORS.** Em produção, `ORIGENS_PERMITIDAS` não pode ser `*`: a API se recusa a
-subir. O `render.yaml` libera só `http://localhost:4000`, a página de prova — é
-o único cliente de navegador que existe. O aplicativo Android e o webhook do
-Mercado Pago não são navegadores e não passam por CORS; os pedidos deles não
-levam o cabeçalho `Origin` e são atendidos como sempre. Cada origem se escreve
-como o navegador a envia — esquema, host e porta, sem barra no final —, e
-qualquer outra forma também impede a subida, em vez de bloquear o site sem
-explicação. Com o token no cabeçalho, e não em cookie, `*` não entregaria a
-sessão de ninguém a outro site; restringir é defesa em profundidade.
-
-**O webhook precisa ser configurado na aplicação DONA da credencial.** Um
-Access Token do Mercado Pago tem a forma
-`APP_USR-<aplicação>-<data>-<segredo>-<conta>`. As notificações de um pagamento
-saem da aplicação que criou o checkout e são assinadas com a chave **dela**.
-Configurar o webhook noutra aplicação — a da sua conta pessoal, por exemplo —
-faz a simulação do painel passar e todo pagamento real falhar com
-`assinatura_nao_confere`, porque a simulação é disparada pela aplicação certa
-para aquela chave. Para usar uma conta de teste vendedora, entre no Mercado
-Pago **como ela**, numa janela anônima, e configure o webhook na aplicação que
-aparece lá.
-
-**Limitações do plano gratuito**, que precisam constar dos resultados:
-
-- O serviço hiberna depois de 15 minutos parado; a primeira requisição depois
-  disso leva perto de um minuto.
-- A rotina de expiração só roda com a API acordada. A reconciliação cobre o
-  aviso perdido, mas as sessões de teste devem começar acordando o serviço.
-- Não há região no Brasil. De Virginia, cada ida ao banco custa **115 ms**
-  medidos, contra 56 ms de uma máquina local em Quixadá — os tempos da API
-  publicada não são comparáveis aos do teste de concorrência local.
-
-Para verificar a publicação ponta a ponta, com pagamento real em sandbox:
-
-```bash
-npm run verificar:portao
-```
-
-Ele agenda com token real do Firebase, abre o checkout, espera você pagar e
-confere a confirmação. **Como ele distingue webhook de reconciliação:** a
-reconciliação só age sobre reservas já vencidas, então confirmação enquanto a
-reserva ainda está no prazo só pode ter vindo do webhook. É critério de estado,
-não cronômetro. Com `-- --expiracao`, verifica também que a reserva abandonada
-devolve o horário à grade.
-
-## Teste de concorrência
-
-O critério objetivo do projeto (Seção 4.5) é **zero conflitos** com cem
-requisições simultâneas para o mesmo horário. Para verificar:
-
-```bash
-npm run carga
-```
-
-São três fases de 10 rodadas, cada rodada com cem pacientes diferentes:
-
-| Fase | O que faz | O que prova |
-|---|---|---|
-| A | Cem `POST /consultas` pelo mesmo horário, pela API completa | Não há duplicidade na prática |
-| B | Cem chamadas direto ao adaptador, sem a checagem prévia | As recusas são do `UPDATE` condicional, e não do índice único |
-| C | O horário é reservado e cancelado (versão 2); cem pedidos chegam com a versão 0 | Só a condição de versão recusa — o papel próprio do lock otimista |
-
-A fase B distingue o `UPDATE` do índice pela sequência de ids de `consulta`: toda
-tentativa de `INSERT` consome um número, mesmo quando é desfeita, então uma
-rodada correta avança a sequência em exatamente um.
-
-O relatório fica em `docs/resultados/concorrencia/`, com data, commit, ambiente
-(provedor, isolamento, tempo de uma ida ao banco) e as latências brutas em JSON.
-Com `-- --ensaio`, roda sem gravar relatório; é assim que a integração contínua
-o executa.
-
-Roda sempre contra o banco de teste, que é apagado no início. Os relatórios
-oficiais devem ser gerados com a árvore limpa, para que o commit citado seja
-exatamente o código medido.
-
-**Conflito** é agendamento duplicado — mais de uma consulta ativa no mesmo
-horário. **Recusa** é o `409` de quem perdeu a disputa: 99 por rodada é o
-resultado correto. O HTTP chama o 409 de *Conflict*, mas recusa não é conflito.
-
-O teste roda com o [limite de escritas](#limite-de-escritas) num valor que não
-dispara. O limitador barra o pedido antes do caso de uso, então só pode tirar
-pedidos da disputa, nunca criar uma: medir sem ele é o pior caso para o lock.
+Render ela hiberna depois de 15 minutos parada. Um lembrete pode sair atrasado,
+ou não sair.
 
 ## Autenticação
 
 A identidade é do Firebase Authentication. O aplicativo faz login no Firebase e
-envia o ID Token em cada requisição protegida:
-
-```
-Authorization: Bearer <id-token>
-```
-
-A API verifica o token com o Admin SDK. **Uid e e-mail vêm sempre do token
-verificado**, nunca do corpo da requisição.
+envia o ID Token em cada requisição protegida (`Authorization: Bearer
+<id-token>`). A API verifica o token com o Admin SDK. **Uid e e-mail vêm sempre
+do token verificado**, nunca do corpo da requisição.
 
 | Rota | O que faz |
 |---|---|
@@ -591,10 +283,7 @@ verificado**, nunca do corpo da requisição.
 | `GET /pacientes/me` | Lê o próprio perfil |
 | `PATCH /pacientes/me` | Atualiza nome, telefone ou data de nascimento |
 
-Não há rota que receba id de paciente: `/me` é resolvido pelo token, e por
-isso ninguém lê o perfil de outra pessoa trocando um número na URL.
-
-Respostas relevantes para o aplicativo:
+Não há rota que receba id de paciente: `/me` é resolvido pelo token.
 
 | Código | Ação indicada | Quando |
 |---|---|---|
@@ -611,295 +300,188 @@ instante do aceite pelo relógio do servidor, e o banco recusa paciente sem esse
 dois campos. Cadastros e atualizações geram linha em `auditoria`, com os nomes
 dos campos alterados e nunca os valores.
 
-A versão vigente vem de `GET /consentimento/termo-vigente`, pública e sem
-cache:
+A versão vigente vem de `GET /consentimento/termo-vigente` (`{ "termo": {
+"versao": "2026-09-v2" } }`). O aplicativo não embute a versão, e **o aceite
+precisa ser do texto que a pessoa leu**: se a versão vigente não for a do texto
+que o aplicativo tem, ele pede para ser atualizado em vez de enviar o aceite.
 
-```json
-{ "termo": { "versao": "2026-09-v2" } }
-```
+## Publicação
 
-O aplicativo não embute a versão: o termo ainda vai mudar depois do parecer do
-Comitê de Ética, e uma versão embutida quebraria o cadastro em todo aplicativo
-já instalado. **O aceite precisa ser do texto que a pessoa leu.** O texto vai no
-aplicativo; se a versão vigente não for a do texto que ele tem, o aplicativo
-não envia o aceite de um texto que não mostrou — pede para ser atualizado.
+A API roda no Render, descrita por [`render.yaml`](render.yaml); só os segredos
+ficam no painel. O banco fica no Neon e a autenticação no Firebase. As
+migrations rodam antes de a porta abrir (`npm run migrate && npm start`), para
+uma publicação com migration pendente não subir pela metade.
 
-### Credencial do Firebase
+**CORS.** Em produção, `ORIGENS_PERMITIDAS` não pode ser `*`: a API se recusa a
+subir. O aplicativo Android e o webhook do Mercado Pago não são navegadores e
+não passam por CORS.
 
-Em desenvolvimento, aponte para o JSON da conta de serviço **pelo caminho**:
+**Limitações do plano gratuito:**
 
-```
-GOOGLE_APPLICATION_CREDENTIALS=C:/caminho/fora/do/repositorio/chave.json
-```
+- o serviço hiberna depois de 15 minutos parado, e a primeira requisição depois
+  disso leva perto de um minuto;
+- as rotinas de expiração e de lembrete só rodam com a API acordada;
+- não há região no Brasil: cada ida ao banco custa cerca de 115 ms, contra
+  56 ms de uma máquina local em Quixadá.
 
-Em hospedagem sem arquivo, defina `FIREBASE_PROJECT_ID`,
-`FIREBASE_CLIENT_EMAIL` e `FIREBASE_PRIVATE_KEY` no painel do provedor. Em
-produção, a API não sobe sem uma das duas formas.
+## Testes e verificação
 
-### Testes e token real
+- **Suíte automatizada** (Jest e Supertest), contra um banco de teste próprio,
+  com um verificador de token falso que tem o mesmo contrato do real. Roda na
+  integração contínua a cada envio.
+- **Cada mecanismo relevante foi confirmado reintroduzindo o defeito:** o teste
+  só conta se falhar sem a proteção que diz proteger.
+- **Contra os serviços reais:** scripts provam a autenticação com tokens do
+  Firebase, a credencial e o pagamento no sandbox do Mercado Pago e o fluxo
+  publicado de ponta a ponta, sem nunca imprimir token, senha ou chave.
 
-A suíte usa um verificador de token falso, com o mesmo contrato do real, e roda
-sem rede e sem credencial. A autenticação com o Firebase de verdade — e, com
-ela, o agendamento disputado entre dois pacientes — é provada por um script, com
-a API rodando em outro terminal:
+| Comando | O que faz |
+|---|---|
+| `npm test` | Suíte completa |
+| `npm run test:unit` | Só os testes de unidade, sem banco |
+| `npm run carga` | Teste de concorrência, com relatório (abaixo) |
+| `npm run verificar:token` | Autenticação com tokens reais do Firebase |
+| `npm run verificar:sandbox` | Credencial do Mercado Pago: conta de teste, checkout e pagamento |
+| `npm run verificar:pix` | Versão 2: um Pix de teste de R$ 1,00 contra o sandbox real |
+| `npm run verificar:portao` | Agenda, paga em sandbox e confere a confirmação pelo webhook, contra a API publicada |
+| `npm run exportar:pesquisa` | Conjunto de dados da pesquisa, pseudonimizado (abaixo) |
+| `npm run auditar:historico` | Procura credenciais em todo o histórico do Git (abaixo) |
 
-```powershell
-$env:FIREBASE_WEB_API_KEY = "..."
-$env:SENHA_PACIENTE_A     = "..."
-$env:SENHA_PACIENTE_B     = "..."
-npm run verificar:token
-```
+### Teste de concorrência
 
-O script não imprime token, senha nem chave.
+O critério objetivo do projeto é **zero conflitos** com cem requisições
+simultâneas para o mesmo horário. São três fases de 10 rodadas, cada rodada com
+cem pacientes diferentes:
 
-## Exportação para a pesquisa
+| Fase | O que faz | O que prova |
+|---|---|---|
+| A | Cem `POST /consultas` pelo mesmo horário, pela API completa | Não há duplicidade na prática |
+| B | Cem chamadas direto ao adaptador, sem a checagem prévia | As recusas são do `UPDATE` condicional, e não do índice único |
+| C | O horário é reservado e cancelado (versão 2); cem pedidos chegam com a versão 0 | Só a condição de versão recusa — o papel próprio do lock otimista |
 
-A proposta promete que os dados coletados serão pseudonimizados (Seção 4.6) e
-descartados ao fim da pesquisa (4.7). A exportação é o que entrega esse
-conjunto: tira do banco só o que a análise precisa, com paciente e consulta
-trocados por pseudônimos.
+A fase B distingue o `UPDATE` do índice pela sequência de ids de `consulta`:
+toda tentativa de `INSERT` consome um número, mesmo quando é desfeita, então uma
+rodada correta avança a sequência em exatamente um.
 
-```powershell
-npm run exportar:pesquisa -- --saida C:\pesquisa\exportacao-2026-10
-```
+Os relatórios ficam em [`docs/resultados/concorrencia/`](docs/resultados/concorrencia/),
+com data, commit, ambiente e as latências brutas. **Conflito** é agendamento
+duplicado; **recusa** é o 409 de quem perdeu a disputa, e 99 por rodada é o
+resultado correto. O teste roda com o limite de escritas num valor que não
+dispara, que é o pior caso para o lock.
 
-O banco é o de `DATABASE_URL`; para exportar o de produção, defina-a no
-terminal antes. O script mostra host e nome do banco, nunca usuário nem senha.
+### Exportação para a pesquisa
 
-**O segredo.** O pseudônimo é um HMAC-SHA256 do id com
-`SEGREDO_PSEUDONIMIZACAO` — a "informação adicional mantida separadamente" da
-LGPD, Art. 13. Gere-o no **seu** terminal e guarde-o como uma senha: no `.env`,
-que não vai para o Git, ou fora do repositório.
-
-```powershell
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-```
-
-O mesmo segredo dá os mesmos pseudônimos de uma exportação para outra. Sem
-segredo, ou com menos de 32 caracteres, a exportação não roda.
+A exportação tira do banco só o que a análise precisa, com paciente e consulta
+trocados por pseudônimos: um HMAC-SHA256 do id com um segredo que nunca vai
+para o Git (a "informação adicional mantida separadamente" da LGPD, Art. 13).
 
 | Arquivo | Colunas |
 |---|---|
-| `consultas.csv` | `consulta`, `paciente`, `status`, `motivo_cancelamento`, `inicio`, `criada_em`, `paga` (1 se houve pagamento aprovado), `lembrete_enviado_em` |
-| `eventos.csv` | `paciente`, `consulta`, `ator` (paciente, sistema ou webhook), `acao`, `instante` — toda a auditoria, sem o campo `detalhe` |
+| `consultas.csv` | `consulta`, `paciente`, `status`, `motivo_cancelamento`, `inicio`, `criada_em`, `paga`, `lembrete_enviado_em` |
+| `eventos.csv` | `paciente`, `consulta`, `ator`, `acao`, `instante` — toda a auditoria, sem o campo `detalhe` |
 
-Instantes em UTC, ISO 8601. **Não saem:** nome, e-mail, telefone, data de
-nascimento, uid do Firebase, token de aparelho, profissional, especialidade
-(dado sensível, LGPD Art. 11), valor e identificadores do Mercado Pago. As
-colunas são uma lista fechada no código: uma coluna nova no banco só entra na
-exportação se alguém a acrescentar ali.
+**Não saem:** nome, e-mail, telefone, data de nascimento, uid do Firebase,
+token de aparelho, profissional, especialidade (dado sensível, LGPD Art. 11),
+valor e identificadores do Mercado Pago. As colunas são uma lista fechada no
+código. A exportação recusa gravar dentro do repositório, nunca sobrescreve uma
+anterior e confere que dois ids não deram o mesmo pseudônimo.
 
-**Guardas.** A exportação recusa gravar dentro do repositório, que é público;
-nunca sobrescreve uma exportação anterior; e confere que dois ids não deram o
-mesmo pseudônimo.
+**Pseudonimizado não é anônimo:** enquanto o banco existir, uma linha exportada
+pode ser casada com a dele. Até o fim da pesquisa, o conjunto continua sendo
+dado pessoal.
 
-**Pseudonimizado não é anônimo.** Os instantes são exatos, então, enquanto o
-banco existir, uma linha exportada pode ser casada com a linha dele mesmo sem o
-segredo. Até o fim da pesquisa, o conjunto continua sendo dado pessoal e deve
-ser tratado como tal. O descarte da Seção 4.7 — do segredo **e** do banco — é o
-que desfaz a associação de vez.
-
-## Credenciais fora do histórico
+### Credenciais fora do histórico
 
 O repositório é público, e credencial que entra num commit continua no
-histórico mesmo depois de apagada. Para conferir:
+histórico mesmo depois de apagada. O `auditar:historico` lê cada linha
+acrescentada em cada commit, de todas as referências, e procura `.env`
+versionado, chave privada, JSON de conta de serviço, token do Mercado Pago, URL
+do PostgreSQL com senha e outros segredos. Relata commit, arquivo, linha e tipo
+— **nunca o valor** — e roda na integração contínua a cada envio.
 
-```bash
-npm run auditar:historico
-```
+Se acusar algo, o que resolve é **trocar a credencial**: reescrever o histórico
+não desfaz uma exposição que já foi publicada. Falsos positivos revisados ficam
+em [`scripts/excecoes-da-auditoria.js`](scripts/excecoes-da-auditoria.js), com
+o motivo.
 
-O script lê cada linha acrescentada em cada commit, de todas as referências, e
-o nome de cada arquivo que já existiu. Procura `.env` versionado, arquivo de
-chave, JSON de conta de serviço, bloco de chave privada, token do Mercado Pago,
-URL do PostgreSQL com senha, senha do Neon, token do GitHub e valor atribuído a
-variável secreta. Relata commit, arquivo, linha e tipo — **nunca o valor** — e
-sai com erro se achar algo. Roda na integração contínua a cada envio.
+## Versão 2
 
-Não acusa a configuração do app Web do Firebase (`apiKey`, `appId`, VAPID), que
-é pública por natureza, nem o banco descartável da integração contínua ou os
-valores falsos que os testes usam de propósito. Em código e em texto corrido
-(`.md`, `.txt`), variável secreta só é acusada quando o valor tem forma de
-segredo gerado: numa frase como "o `MERCADO_PAGO_ACCESS_TOKEN`: a credencial da
-conta de teste", o "valor" é uma palavra. Uma credencial de verdade colada num
-texto continua acusada pela própria estrutura.
+A versão 2 ("iFood mínimo") vive na homologação, que publica a branch
+`versao-2` (`https://agendamento-clinico-homolog.onrender.com`), com banco
+próprio. A produção não recebe nada dela. Tudo é aditivo: nenhum campo da v1
+mudou.
 
-Se acusar algo, o que resolve é **trocar a credencial**. Reescrever o histórico
-não desfaz uma exposição que já foi publicada: o valor pode ter sido copiado
-antes.
-
-Se, revisado, o achado não for credencial, ele vai para
-[`scripts/excecoes-da-auditoria.js`](scripts/excecoes-da-auditoria.js) com
-commit, arquivo, linha, tipo e o motivo. Sem essa saída, um falso positivo
-deixaria a integração contínua vermelha para sempre, porque o histórico não
-muda. A exceção precisa coincidir em tudo com o achado, e credencial de verdade
-nunca entra ali.
-
-## Versão 2 (homologação)
-
-A versão 2 ("iFood mínimo") vive só na homologação, que publica a branch
-`versao-2`: `https://agendamento-clinico-homolog.onrender.com`, com banco
-próprio. Os participantes da pesquisa usam a v1.0.0 contra a produção, que não
-recebe nada desta seção enquanto a coleta durar. Tudo aqui é aditivo: nenhum
-campo da v1 mudou.
-
-**Etapa 20: cidade, planos, formas de pagamento e próximo horário.**
+### Cidade, planos, formas de pagamento e próximo horário
 
 | Rota | O que faz |
 |---|---|
-| `GET /cidades` | `{ cidades: [{ id, nome, uf }] }`: só as cidades com profissional ativo, em ordem alfabética. Cache de 5 minutos |
-| `GET /planos` | `{ planos: [{ id, nome }] }`: só os planos aceitos por profissional ativo, em ordem alfabética. Cache de 5 minutos |
-| `GET /profissionais?cidade=&plano=` | Filtros novos, opcionais e combináveis com `especialidade` e `q`. Id inexistente devolve lista vazia; valor inválido, `DADOS_INVALIDOS` |
+| `GET /cidades` | `{ cidades: [{ id, nome, uf }] }`: só as cidades com profissional ativo. Cache de 5 minutos |
+| `GET /planos` | `{ planos: [{ id, nome }] }`: só os planos aceitos por profissional ativo. Cache de 5 minutos |
+| `GET /profissionais?cidade=&plano=` | Filtros novos, opcionais e combináveis com `especialidade` e `q` |
 
-Cada profissional do catálogo (lista e detalhe) ganha:
+Cada profissional do catálogo ganha:
 
-- `clinica.cidade` (`{ id, nome, uf }` ou `null`), `clinica.latitude` e
-  `clinica.longitude` (números ou `null`, sempre juntos). A distância é
-  calculada no aparelho; a localização do paciente não chega à API;
-- `planos`: `[{ id, nome }]`, em ordem alfabética, ou `[]`;
-- `formasDePagamento`: na ordem `app`, `plano`, `clinica`, **nunca vazia**. O
-  banco exige que todo profissional aceite o aplicativo ou a clínica, e
-  "plano" vale quando há ao menos um cadastrado;
-- `proximoHorario`: `{ id, inicio }` do horário livre mais cedo que ainda não
-  começou, ou `null`. **Sempre presente** no catálogo: para o aplicativo, a
-  ausência do campo quer dizer "API da v1". É indicativo, porque a lista tem cache
-  de 5 minutos; para agendar, vale a grade.
-
-Na leitura de consultas, a clínica traz a cidade e as coordenadas, mas o
-profissional **não** traz `planos`, `formasDePagamento` nem `proximoHorario`:
-são do catálogo, e lá ficam ausentes, como na v1.
+- `clinica.cidade`, `clinica.latitude` e `clinica.longitude` (ou `null`). A
+  distância é calculada no aparelho; a localização do paciente não chega à API;
+- `planos`: `[{ id, nome }]`, ou `[]`;
+- `formasDePagamento`: na ordem `app`, `plano`, `clinica`, **nunca vazia**;
+- `proximoHorario`: `{ id, inicio }` do horário livre mais cedo, ou `null`.
+  É indicativo, por causa do cache; para agendar, vale a grade.
 
 Planos e próximo horário saem de subconsultas `LATERAL`, e o filtro por plano é
-um `EXISTS`. Um `JOIN` com os planos repetiria o profissional uma vez por plano,
-e o total da paginação contaria cada repetição.
+um `EXISTS`: um `JOIN` repetiria o profissional uma vez por plano e inflaria o
+total da paginação.
 
-**Etapa 21: pagar com o plano ou na clínica.** O `POST /consultas` aceita,
-opcionais, `formaDePagamento` (`app`, `plano` ou `clinica`) e `planoId` (só,
-e sempre, com `plano`). Sem eles, o fluxo de sempre.
+### Pagar com o plano ou na clínica
+
+O `POST /consultas` aceita, opcionais, `formaDePagamento` (`app`, `plano` ou
+`clinica`) e `planoId` (só, e sempre, com `plano`).
 
 | Forma | Consulta criada |
 |---|---|
 | `app` (ou ausente) | `pendente_pagamento`, com reserva de 15 minutos e checkout depois |
-| `plano` ou `clinica`, aceitos pelo profissional | `confirmada`, com `reservaExpiraEm: null`, sem checkout. A clínica confere o plano no dia |
+| `plano` ou `clinica`, aceitos pelo profissional | `confirmada`, sem prazo e sem checkout. A clínica confere o plano no dia |
 
-As recusas, na ordem em que acontecem:
+Forma ou plano que o profissional não aceita respondem 422
+`FORMA_DE_PAGAMENTO_NAO_ACEITA` ou `PLANO_NAO_ACEITO`. A conferência acontece
+**dentro da transação da reserva**, depois do lock otimista, e a recusa desfaz
+a reserva. Toda consulta da v2 traz `formaDePagamento` e `plano`. O banco guarda
+a regra em três restrições: plano escolhido se, e somente se, a forma é plano;
+só o app fica `pendente_pagamento`; só o app tem prazo de reserva.
 
-1. corpo inválido (forma desconhecida, plano sem `planoId`, `planoId` com
-   outra forma): 422 `DADOS_INVALIDOS`;
-2. horário passado, indisponível ou sobreposto: como sempre;
-3. versão disputada: 409 `HORARIO_INDISPONIVEL`;
-4. profissional inativo: 422 `PROFISSIONAL_INDISPONIVEL`;
-5. forma ou plano que o profissional não aceita, ou plano que nem existe: 422
-   `FORMA_DE_PAGAMENTO_NAO_ACEITA` ou `PLANO_NAO_ACEITO`, com ação nula.
+### Pagar com Pix (sandbox), desligado por padrão
 
-As duas últimas são conferidas **dentro da transação da reserva**, depois do
-lock otimista, que não mudou. A recusa desfaz a reserva: o horário volta
-livre e na mesma versão.
-
-Toda consulta da v2 traz `formaDePagamento` e `plano` (`{ id, nome }` ou
-`null`). Uma consulta de plano ou na clínica não se paga pelo aplicativo (422
-`CONSULTA_NAO_PAGAVEL`, "Esta consulta não é paga pelo aplicativo.") e segue as
-mesmas regras de cancelamento das outras. A rotina de expiração não a toca, e
-o lembrete a alcança como a qualquer consulta confirmada.
-
-O banco guarda a regra com três restrições:
-
-- plano escolhido se, e somente se, a forma é plano;
-- só o app fica `pendente_pagamento`;
-- só o app tem prazo de reserva.
-
-A auditoria registra a forma, mas não o plano.
-
-**O catálogo de demonstração**, para a homologação:
-
-```bash
-npm run seed -- --ate 2026-12-15
-npm run seed:demonstracao -- --ate 2026-12-15
-npm run seed:exemplos
-```
-
-- **O que ele cria:** três cidades do Ceará, com três clínicas em Quixadá,
-  três em Quixeramobim e uma em Fortaleza, cada uma com coordenadas próprias
-  (o "Perto de mim" do app ordena por elas); quatro planos com nomes
-  inventados; quatro especialidades além das seis do seed base; 20
-  profissionais fictícios, os criados aqui com registro `CRM-CE 0001xx`, que
-  não coincide com o de um médico de verdade. Inclui os três casos do card: Ana sem plano, Carlos com três
-  planos e Íris sem horário livre. Também varia as formas de pagamento: Heitor
-  só por plano ou na clínica, Fernanda também na clínica.
-- **A ordem importa: sempre depois do seed base.** O base cria horário para
-  todo profissional ativo, e a demonstração retira os da Íris.
-- **Ele se recusa a rodar** quando o nome do banco tem `producao` ou `coleta`,
-  antes de qualquer escrita: dado fictício nunca entra no banco da coleta.
-
-**As consultas de exemplo** (`npm run seed:exemplos`, sempre por último):
-
-- **10 pacientes fictícios**, com identificador de conta
-  `demonstracao-paciente-NN`, que não existe no Firebase (ninguém entra no app
-  com eles), e e-mail do domínio reservado `exemplo.invalid`.
-- **40 consultas nos 20 dias úteis anteriores** (32 realizadas, 4 faltas e 4
-  canceladas pelo paciente) e **15 confirmadas nos 10 seguintes**, nas três
-  formas de pagamento, só em Quixadá e Quixeramobim. As pagas pelo app têm
-  pagamento `aprovado` em sandbox, com referência fictícia.
-- **O que fica de fora de propósito:** reserva `pendente_pagamento` (a rotina
-  de expiração consultaria o Mercado Pago), a Íris e Fortaleza, e registro na
-  auditoria (as consultas não passaram pela API).
-- **Não toca em consulta de outra pessoa:** horário já reservado é pulado.
-  Rodar de novo não cria nada. Tem a mesma recusa de banco de produção.
-- **Os números são inventados.** Servem para a agenda não parecer vazia na
-  demonstração; não são resultado e não entram na monografia como dado.
-
-**Pagar com Pix (sandbox), desligado por padrão.** Só existe com
-`PIX_HABILITADO=true`; sem ela, as rotas abaixo nem são montadas e a API
-responde exatamente como antes: com token, 404 `ROTA_NAO_ENCONTRADA`; sem
-token, 401, como qualquer rota de `/consultas`, porque a autenticação vem
-antes da rota. Por isso, de fora, só um pedido com token mostra se a chave
-está ligada. O APK 2.0.1
-nunca as chama.
+As rotas só existem com `PIX_HABILITADO=true`. Desligada a chave, elas nem são
+montadas, e a API responde exatamente como antes.
 
 | Rota | O que faz |
 |---|---|
 | `POST /consultas/:id/pagamento/pix` | 201 com `{ pix: { copiaECola, qrCodeBase64, expiraEm, valorCentavos, valorFormatado } }` quando cria; 200 com o **mesmo** Pix quando já existe um aberto |
 | `POST /consultas/:id/pagamento/pix/conferir` | 200 com `{ consulta }`: pergunta ao Mercado Pago se o Pix foi pago e, se foi, confirma pelo mesmo caminho do webhook. O app chama a cada 5 segundos enquanto espera |
 
-- **As regras do checkout valem iguais:** só a consulta do próprio paciente
-  (a de outro responde 404), pelo aplicativo, aguardando pagamento e dentro
-  do prazo (senão 422 `CONSULTA_NAO_PAGAVEL`); provedor fora do ar, 503
-  `PAGAMENTO_INDISPONIVEL`; o limite de escritas conta as duas rotas.
+- **As regras do checkout valem iguais:** só a consulta do próprio paciente,
+  pelo aplicativo, aguardando pagamento e dentro do prazo.
 - **Um pagamento aberto por consulta, de qualquer meio.** Com a página do
   Mercado Pago aberta, o Pix é recusado, e vice-versa: 409
-  `PAGAMENTO_EM_ANDAMENTO`. É o mesmo índice único de antes.
+  `PAGAMENTO_EM_ANDAMENTO`.
 - **Quem decide confirmar continua sendo o domínio:** estado, valor e moeda
-  conferidos, sob bloqueio. Um valor diferente do da consulta não confirma.
-- **A reconciliação da expiração não mudou:** o pagamento do Pix aparece na
-  busca por referência que ela já usa (provado no sandbox em 21/11), então um
-  Pix pago no último instante confirma em vez de cancelar.
+  conferidos, sob bloqueio.
+- **A reconciliação da expiração não mudou:** ela já enxerga o pagamento do
+  Pix, então um Pix pago no último instante confirma em vez de cancelar.
 - **Nenhum dado do paciente vai ao Mercado Pago.** O pedido (API de Orders,
-  Checkout Transparente) leva a referência aleatória, o valor, o prazo da
-  reserva e um pagador fictício fixo (`first_name: "APRO"`, que no sandbox se
-  aprova sozinho em segundos). Isso só é possível porque a trava de sandbox
-  impede a API de subir com credencial real.
-- **Banco:** a migration 012 só acrescenta `meio` (`checkout` por padrão, ou
-  `pix`), `pix_copia_e_cola` e `pix_qr_base64` na tabela `pagamento`, com
-  restrições que guardam as colunas do Pix só no Pix. O código anterior
-  convive com ela sem perceber.
+  Checkout Transparente) leva a referência aleatória, o valor, o prazo e um
+  pagador fictício fixo, que no sandbox se aprova sozinho em segundos.
+- **Banco:** a migration 012 só acrescenta colunas à tabela `pagamento`. Por
+  isso há caminho de volta: desligar a chave, voltar o deploy ou desfazer a
+  migration.
 
-**O caminho de volta do Pix**, do mais leve ao mais pesado:
+### Dados de demonstração
 
-0. **Antes de publicar:** a tag `antes-do-pix` no commit da `versao-2`
-   anterior ao Pix, e uma cópia (branch) do banco da homologação no painel do
-   Neon.
-1. **Desligar a variável** `PIX_HABILITADO=false` no Render. Sem deploy de
-   código, as rotas voltam a 404 em cerca de um minuto.
-2. **Voltar o deploy** pelo *Rollback* do Render para o deploy de
-   `antes-do-pix`. Funciona porque a migration 012 é só acréscimo.
-3. **Desfazer de vez:** `git revert` do merge e
-   `node scripts/migrar.js --desfazer` no banco da homologação, que remove a
-   012 e apaga os Pix de teste. No limite, restaurar a cópia do Neon.
-
-**Banco de teste local:** as migrations 010, 011 e 012 só existem na
-`versao-2`. Antes de voltar a trabalhar na `main`, desfaça as três no banco de
-teste (`node scripts/migrar.js --teste --desfazer`, três vezes). Senão, o teste do `migrate` na
-`main` encontra uma migration que os arquivos dela não têm. A CI não tem esse
-problema, porque cria um banco do zero a cada execução.
+Só na homologação, `seed:demonstracao` e `seed:exemplos` criam um catálogo
+fictício (três cidades do Ceará, sete clínicas, 20 profissionais) e um
+histórico de consultas de 10 pacientes que não existem no Firebase. Os dois se
+recusam a rodar em banco de produção. **Os números são inventados:** servem
+para a demonstração e não são resultado da pesquisa.
 
 ## Licença
 
